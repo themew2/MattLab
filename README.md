@@ -18,7 +18,10 @@ run both at once.
 ## How it works
 
 - Each day is two rounds of 5 questions, 10 max. Finishing round 1 offers "Play again"
-  for round 2. The day resets at midnight in `TZ` (UTC by default).
+  for round 2. New questions arrive daily at `RESET_HOUR_UTC` (16, i.e. 4pm UTC, by default).
+- A perfect day (all 10 correct, no skips) unlocks a geometry bonus question worth
+  `BONUS_POINTS` (100). It's identify-the-concept multiple choice with a server-drawn
+  picture: one try, no skip, and it doesn't count toward the 10.
 - Every round has at least one fundamentals question and one word problem. Topics don't
   repeat within a day. There are 20 topic generators:
   - Fundamentals (always multiple choice): order of operations, integer operations,

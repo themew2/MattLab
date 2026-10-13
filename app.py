@@ -4,9 +4,8 @@ import os
 import re
 import secrets
 import sqlite3
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
-from zoneinfo import ZoneInfo
 
 from flask import Flask, g, jsonify, request, send_from_directory, session
 
@@ -15,8 +14,9 @@ import questions as Q
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "algebra.db")
-TZ = ZoneInfo(os.environ.get("TZ", "UTC"))
+RESET_HOUR = int(os.environ.get("RESET_HOUR_UTC", 16))  # new questions every day at this hour, UTC
 POINTS = int(os.environ.get("POINTS_PER_CORRECT", 10))
+BONUS_POINTS = int(os.environ.get("BONUS_POINTS", 100))  # the geometry bonus after a perfect day
 HALF_SKIP = POINTS // 2  # the first skip in each round earns this; later skips earn 0
 # stars roll up like coins: 3 silvers make a gold, 3 golds a platinum, 3 platinums a diamond
 STAR_LEVELS = [("diamond", 2700), ("platinum", 900), ("gold", 300), ("silver", 100)]
@@ -91,7 +91,8 @@ def _close_db(_):
 
 
 def today():
-    return datetime.now(TZ).date().isoformat()
+    """The game day: it starts at RESET_HOUR UTC and is named for the date it started on."""
+    return (datetime.now(timezone.utc) - timedelta(hours=RESET_HOUR)).date().isoformat()
 
 
 def require_user(fn):
@@ -108,8 +109,9 @@ def require_user(fn):
 
 
 def next_reset():
-    now = datetime.now(TZ)
-    return datetime.combine(now.date() + timedelta(days=1), time(), TZ).isoformat()
+    now = datetime.now(timezone.utc)
+    reset = now.replace(hour=RESET_HOUR, minute=0, second=0, microsecond=0)
+    return (reset if reset > now else reset + timedelta(days=1)).isoformat()
 
 
 def stars(points):
@@ -137,17 +139,18 @@ def day_attempts(uid, day):
 
 def unlocked(atts):
     """How many of today's questions are playable: the next round opens once every question in
-    the round before it is answered or skipped."""
+    the round before it is answered or skipped, and the bonus only after a perfect day."""
     n = Q.ROUND_SIZE
     for r in range(Q.ROUNDS):
         if any(i not in atts for i in range(r * n, (r + 1) * n)):
             return (r + 1) * n
-    return Q.ROUNDS * n
+    perfect = all(atts[i]["status"] == "correct" for i in range(Q.BONUS_IDX))
+    return Q.BONUS_IDX + 1 if perfect else Q.BONUS_IDX
 
 
 def stale_day(day):
     """The browser sends the day its questions came from. Without this, an answer sent just after
-    midnight would be graded against (and recorded on) the new day's question at the same index."""
+    the daily reset would be graded against (and recorded on) the new day's question at the same index."""
     if day != today():
         return jsonify(error="A new day has started. Loading today's questions.", stale=True), 409
     return None
@@ -181,14 +184,14 @@ def totals(uid):
 
 def public(i, q, att):
     d = {"idx": i, "topic": q["topic"], "kind": q["kind"], "prompt": q["prompt"], "hint": q.get("hint"),
-         "category": q["category"]}
+         "category": q["category"], "figure": q.get("figure")}
     if q["kind"] == "mc":
         d["choices"] = q["choices"]
     if att:
         d.update(status=att["status"], given=att["given"], points=att["points"],
                  correct_answer=q["answer_text"], step_count=len(q["steps"]),
                  # fundamentals explain a wrong answer right away instead of waiting for "Walk me through it"
-                 auto_explain=q["category"] == "fundamentals" and att["status"] == "wrong")
+                 auto_explain=q["category"] in ("fundamentals", "bonus") and att["status"] == "wrong")
         if att["status"] == "wrong":
             d["mistake"] = q.get("mistakes", {}).get(att["given"])
     else:
@@ -252,6 +255,7 @@ def today_view():
     qs = todays_set(g.user["id"], day)
     atts = day_attempts(g.user["id"], day)
     return jsonify(name=g.user["name"], day=day, points_per_correct=POINTS, half_skip=HALF_SKIP,
+                   bonus_points=BONUS_POINTS,
                    round_size=Q.ROUND_SIZE, rounds=Q.ROUNDS, next_reset=next_reset(),
                    questions=[public(i, q, atts.get(i)) for i, q in enumerate(qs[:unlocked(atts)])],
                    totals=totals(g.user["id"]))
@@ -282,7 +286,7 @@ def answer():
         if correct is None:
             return jsonify(error="Enter a number, like 7, -2.5, or 3/4."), 400
 
-    pts = POINTS if correct else 0
+    pts = (BONUS_POINTS if idx == Q.BONUS_IDX else POINTS) if correct else 0
     if not record(day, idx, q, "correct" if correct else "wrong", given, pts):
         return jsonify(error="You already finished this question."), 409
     return jsonify(question=public(idx, q, attempt(g.user["id"], day, idx)), totals=totals(g.user["id"]))
@@ -298,6 +302,8 @@ def skip():
     q, atts = get_question(idx, day)
     if q is None:
         return atts
+    if idx == Q.BONUS_IDX:
+        return jsonify(error="The bonus question can't be skipped."), 400
     start = idx - idx % Q.ROUND_SIZE
     used = any(atts[i]["status"] == "skipped" and atts[i]["points"] > 0
                for i in range(start, start + Q.ROUND_SIZE) if i in atts)

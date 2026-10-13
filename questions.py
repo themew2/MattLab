@@ -5,6 +5,7 @@ seed is derived from (user, day, index), the server can regenerate any question
 to grade it without storing it or ever sending the answer to the browser early.
 The server keys that seed with its secret, so it can't be reproduced from the source.
 """
+import math
 import random
 import re
 from fractions import Fraction
@@ -738,6 +739,611 @@ def fractions(rng):
               [(fnum(v), why) for v, why in distractors] + _near(correct), steps)
 
 
+# ---------------------------------------------------------------- bonus: geometry
+# Identify-the-concept questions with a picture: no calculating. Only used for the bonus question.
+
+FIG_W, FIG_H, FIG_PAD = 260, 190, 30
+
+
+def _unit(a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    n = math.hypot(dx, dy) or 1
+    return dx / n, dy / n
+
+
+def _dist(a, b):
+    return math.hypot(b[0] - a[0], b[1] - a[1])
+
+
+def _xy(p):
+    return f"{p[0]:.1f},{p[1]:.1f}"
+
+
+def _angle_at(v, p1, p2):
+    u1, u2 = _unit(v, p1), _unit(v, p2)
+    return math.degrees(math.acos(max(-1, min(1, u1[0] * u2[0] + u1[1] * u2[1]))))
+
+
+def _a(word):
+    return "an" if word[0].lower() in "aeiou" else "a"
+
+
+class Fig:
+    """Shapes in model coordinates (y points down), rotated and scaled to fit the picture.
+    Marks (ticks, right-angle squares, arcs, arrows) are sized in pixels after fitting."""
+
+    def __init__(self):
+        self.items = []
+
+    def add(self, kind, *pts, **kw):
+        self.items.append((kind, pts, kw))
+        return self
+
+    def svg(self, rot=0.0):
+        c, s = math.cos(rot), math.sin(rot)
+
+        def turn(p):
+            return p[0] * c - p[1] * s, p[0] * s + p[1] * c
+
+        ext = []
+        for kind, pts, kw in self.items:
+            ext += [turn(p) for p in pts]
+            if kind == "circle":
+                cx, cy = turn(pts[0])
+                ext += [(cx - kw["r"], cy - kw["r"]), (cx + kw["r"], cy + kw["r"])]
+            if kind == "ellipse":  # only used unrotated
+                cx, cy = pts[0]
+                ext += [(cx - kw["rx"], cy - kw["ry"]), (cx + kw["rx"], cy + kw["ry"])]
+        xs, ys = [p[0] for p in ext], [p[1] for p in ext]
+        w, h = (max(xs) - min(xs)) or 1, (max(ys) - min(ys)) or 1
+        k = min((FIG_W - 2 * FIG_PAD) / w, (FIG_H - 2 * FIG_PAD) / h)
+        ox = (FIG_W - w * k) / 2 - min(xs) * k
+        oy = (FIG_H - h * k) / 2 - min(ys) * k
+
+        def f(p):
+            x, y = turn(p)
+            return x * k + ox, y * k + oy
+
+        out = []
+        for kind, pts, kw in self.items:
+            P = [f(p) for p in pts]
+            out.append(getattr(self, "_" + kind)(P, k, **kw))
+        return (f'<svg class="geo" viewBox="0 0 {FIG_W} {FIG_H}" role="img" '
+                f'aria-label="Figure for the question">{"".join(out)}</svg>')
+
+    # each renderer takes fitted points and the scale
+    @staticmethod
+    def _poly(P, k, cls="s fill"):
+        return f'<polygon class="{cls}" points="{" ".join(_xy(p) for p in P)}"/>'
+
+    @staticmethod
+    def _seg(P, k, cls="s"):
+        (x1, y1), (x2, y2) = P
+        return f'<line class="{cls}" x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}"/>'
+
+    @staticmethod
+    def _head(tip, frm):
+        u = _unit(frm, tip)
+        n = (-u[1], u[0])
+        a = (tip[0] - u[0] * 10 + n[0] * 5, tip[1] - u[1] * 10 + n[1] * 5)
+        b = (tip[0] - u[0] * 10 - n[0] * 5, tip[1] - u[1] * 10 - n[1] * 5)
+        return f'<path class="s" d="M{_xy(a)} L{_xy(tip)} L{_xy(b)}"/>'
+
+    def _ray(self, P, k):
+        return self._seg(P, k) + self._head(P[1], P[0])
+
+    def _line(self, P, k):
+        return self._seg(P, k) + self._head(P[1], P[0]) + self._head(P[0], P[1])
+
+    @staticmethod
+    def _ticks(P, k, n=1):
+        a, b = P
+        u = _unit(a, b)
+        nrm = (-u[1], u[0])
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        out = ""
+        for i in range(n):
+            off = (i - (n - 1) / 2) * 5
+            cx, cy = mid[0] + u[0] * off, mid[1] + u[1] * off
+            out += Fig._seg([(cx - nrm[0] * 7, cy - nrm[1] * 7), (cx + nrm[0] * 7, cy + nrm[1] * 7)], k, "m")
+        return out
+
+    @staticmethod
+    def _par(P, k, n=1):
+        """Arrow marks in the middle of a side, showing it's parallel to sides with the same marks."""
+        a, b = P
+        u = _unit(a, b)
+        nrm = (-u[1], u[0])
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        out = ""
+        for i in range(n):
+            off = (i - (n - 1) / 2) * 7
+            tip = (mid[0] + u[0] * (off + 4), mid[1] + u[1] * (off + 4))
+            l = (tip[0] - u[0] * 8 + nrm[0] * 6, tip[1] - u[1] * 8 + nrm[1] * 6)
+            r = (tip[0] - u[0] * 8 - nrm[0] * 6, tip[1] - u[1] * 8 - nrm[1] * 6)
+            out += f'<path class="m" d="M{_xy(l)} L{_xy(tip)} L{_xy(r)}"/>'
+        return out
+
+    @staticmethod
+    def _angle(P, k, label=None, right=False, n=1, r=22, sweep=1):
+        v, p1, p2 = P
+        u1, u2 = _unit(v, p1), _unit(v, p2)
+        out = ""
+        if right:
+            s = 12
+            a = (v[0] + u1[0] * s, v[1] + u1[1] * s)
+            b = (a[0] + u2[0] * s, a[1] + u2[1] * s)
+            c = (v[0] + u2[0] * s, v[1] + u2[1] * s)
+            out += f'<path class="m" d="M{_xy(a)} L{_xy(b)} L{_xy(c)}"/>'
+        else:
+            cross = u1[0] * u2[1] - u1[1] * u2[0]
+            sw = sweep if abs(cross) < 1e-6 else (1 if cross > 0 else 0)
+            for i in range(n):
+                rr = r + i * 5
+                a = (v[0] + u1[0] * rr, v[1] + u1[1] * rr)
+                b = (v[0] + u2[0] * rr, v[1] + u2[1] * rr)
+                out += f'<path class="m" d="M{_xy(a)} A{rr} {rr} 0 0 {sw} {_xy(b)}"/>'
+        if label:
+            bx, by = u1[0] + u2[0], u1[1] + u2[1]
+            if math.hypot(bx, by) < 1e-6:  # straight angle: label on the arc's side
+                bx, by = (-u1[1], u1[0]) if sweep == 1 else (u1[1], -u1[0])
+            nb = math.hypot(bx, by)
+            deg = _angle_at(v, p1, p2)
+            d = r + 16 + max(0, 45 - deg) * 0.5
+            x, y = v[0] + bx / nb * d, v[1] + by / nb * d
+            out += f'<text class="lbl" x="{x:.1f}" y="{y:.1f}" text-anchor="middle" dominant-baseline="central">{label}</text>'
+        return out
+
+    @staticmethod
+    def _dot(P, k):
+        return f'<circle class="dot" cx="{P[0][0]:.1f}" cy="{P[0][1]:.1f}" r="3.5"/>'
+
+    @staticmethod
+    def _circle(P, k, r=1.0):
+        return f'<circle class="s fill" cx="{P[0][0]:.1f}" cy="{P[0][1]:.1f}" r="{r * k:.1f}"/>'
+
+    @staticmethod
+    def _ellipse(P, k, rx=1.0, ry=0.3, part="full", cls="s"):
+        (cx, cy), RX, RY = P[0], rx * k, ry * k
+        if part == "full":
+            return f'<ellipse class="{cls}" cx="{cx:.1f}" cy="{cy:.1f}" rx="{RX:.1f}" ry="{RY:.1f}"/>'
+        sweep = 0 if part == "front" else 1  # front = the lower half, nearer the viewer
+        return f'<path class="{cls}" d="M{cx - RX:.1f},{cy:.1f} A{RX:.1f} {RY:.1f} 0 0 {sweep} {cx + RX:.1f},{cy:.1f}"/>'
+
+
+def _geo(rng, topic, prompt, fig, correct, pool, steps, why, hint):
+    others = [c for c in pool if c != correct]
+    rng.shuffle(others)
+    q = mc(rng, topic, prompt, correct, [(o, why(o)) for o in others[:3]], steps)
+    q.update(figure=fig, hint=hint)
+    return q
+
+
+TRI_SIDES = {
+    "Equilateral": "An equilateral triangle has all three sides the same length.",
+    "Isosceles": "An isosceles triangle has exactly two sides the same length.",
+    "Scalene": "A scalene triangle has no sides the same length.",
+    "Right": "A right triangle has one 90° angle, marked with a small square.",
+}
+
+
+def triangle_sides(rng):
+    kind = rng.choice(["Equilateral", "Isosceles", "Scalene"])
+    if kind == "Equilateral":
+        A, B, C = (0, 0), (1, 0), (0.5, -math.sqrt(3) / 2)
+        marks = [(A, C, 1), (C, B, 1), (A, B, 1)]
+        seen = "one tick mark on every side, so all three sides are the same length"
+    elif kind == "Isosceles":
+        while True:
+            w, ht = rng.uniform(0.8, 1.6), rng.uniform(0.6, 1.5)
+            if abs(ht - 0.866 * w) > 0.25 and abs(ht - w / 2) > 0.2:
+                break
+        A, B, C = (0, 0), (w, 0), (w / 2, -ht)
+        marks = [(A, C, 1), (C, B, 1)]
+        seen = "matching tick marks on two sides, so exactly two sides are the same length"
+    else:
+        while True:
+            A, B, C = (0, 0), (rng.uniform(1.2, 1.8), 0), (rng.uniform(0.1, 0.5), -rng.uniform(0.6, 1.1))
+            sides = sorted([_dist(A, B), _dist(B, C), _dist(A, C)])
+            angles = [_angle_at(A, B, C), _angle_at(B, C, A), _angle_at(C, A, B)]
+            if sides[1] / sides[0] > 1.15 and sides[2] / sides[1] > 1.15 and all(abs(x - 90) > 10 for x in angles):
+                break
+        marks = [(A, B, 1), (B, C, 2), (C, A, 3)]
+        seen = "a different number of tick marks on every side, so no two sides are the same length"
+    fig = Fig().add("poly", A, B, C)
+    for a, b, n in marks:
+        fig.add("ticks", a, b, n=n)
+
+    def why(o):
+        if o == "Isosceles" and kind == "Equilateral":
+            return ("An equilateral triangle does have two equal sides, but here all three match, so "
+                    "equilateral is the better name.")
+        if o == "Right":
+            return f"{TRI_SIDES[o]} This triangle has no square mark, so it has no 90° angle."
+        return f"{TRI_SIDES[o]} That doesn't match the tick marks here."
+
+    steps = ["Tick marks show which sides are the same length: sides with the same number of ticks match.",
+             f"This triangle has {seen}.",
+             f"That makes it {_a(kind)} {kind.lower()} triangle. {TRI_SIDES[kind]}"]
+    return _geo(rng, "Geometry: triangles", "The triangle in the picture is an example of which type of triangle?",
+                fig.svg(rng.uniform(0, 2 * math.pi)), kind, list(TRI_SIDES), steps, why,
+                "Sides with the same tick marks are the same length.")
+
+
+TRI_ANGLES = {
+    "Acute": "An acute triangle has all three angles smaller than 90°.",
+    "Right": "A right triangle has one 90° angle, marked with a small square.",
+    "Obtuse": "An obtuse triangle has one angle bigger than 90°.",
+    "Equilateral": "An equilateral triangle has three equal sides and three 60° angles.",
+}
+
+
+def triangle_angles(rng):
+    kind = rng.choice(["Acute", "Right", "Obtuse"])
+    while True:
+        if kind == "Acute":
+            a, b = rng.randint(45, 80), rng.randint(45, 80)
+        elif kind == "Right":
+            a, b = 90, rng.randint(25, 65)
+        else:
+            a = rng.randint(105, 130)
+            b = rng.randint(20, 180 - a - 20)
+        c = 180 - a - b
+        if c >= 20 and (kind != "Acute" or c < 85) and len({a, b, c}) == 3:
+            break
+    angs = [a, b, c]
+    rng.shuffle(angs)
+    al, be, ga = (math.radians(x) for x in angs)
+    A, B = (0, 0), (1, 0)
+    ac = math.sin(be) / math.sin(ga)
+    C = (ac * math.cos(al), -ac * math.sin(al))
+    fig = Fig().add("poly", A, B, C)
+    for v, p1, p2, deg in [(A, B, C, angs[0]), (B, C, A, angs[1]), (C, A, B, angs[2])]:
+        # the square marks the right angle; a "90°" label would crowd the small angle beside it
+        fig.add("angle", v, p1, p2, label=None if deg == 90 else f"{deg}°", right=deg == 90)
+    big = max(angs)
+    listed = ", ".join(f"{x}°" for x in angs)
+
+    def why(o):
+        if o == "Equilateral":
+            return f"{TRI_ANGLES[o]} These angles are {listed}."
+        return f"{TRI_ANGLES[o]} This triangle's biggest angle is {big}°."
+
+    seen = {"Acute": f"The biggest angle is {big}°, which is less than 90°, so every angle is acute.",
+            "Right": "One angle is exactly 90°, marked with the small square.",
+            "Obtuse": f"The biggest angle is {big}°, which is more than 90°."}[kind]
+    steps = ["To name a triangle by its angles, look at its biggest angle.", seen,
+             f"That makes it {_a(kind)} {kind.lower()} triangle. {TRI_ANGLES[kind]}"]
+    return _geo(rng, "Geometry: triangles", "The triangle in the picture is an example of which type of triangle?",
+                fig.svg(rng.uniform(-0.5, 0.5)), kind, list(TRI_ANGLES), steps, why, None)
+
+
+ANGLES = {
+    "Acute": "An acute angle is smaller than a right angle (less than 90°).",
+    "Right": "A right angle is exactly 90°, like the corner of a square. It's marked with a small square.",
+    "Obtuse": "An obtuse angle is bigger than a right angle but smaller than a straight line "
+              "(between 90° and 180°).",
+    "Straight": "A straight angle is a straight line: exactly 180°.",
+}
+
+
+def angle_types(rng):
+    kind = rng.choice(list(ANGLES))
+    deg = {"Acute": rng.randint(20, 65), "Right": 90, "Obtuse": rng.randint(115, 160), "Straight": 180}[kind]
+    t = math.radians(deg)
+    V, P1, P2 = (0, 0), (1.4, 0), (1.4 * math.cos(t), -1.4 * math.sin(t))
+    fig = (Fig().add("ray", V, P1).add("ray", V, P2)
+           .add("angle", V, P1, P2, right=kind == "Right", r=26, sweep=0).add("dot", V))
+    seen = {"Acute": "This angle is narrower than the corner of a square.",
+            "Right": "The small square shows this angle is exactly 90°.",
+            "Obtuse": "This angle is wider than the corner of a square, but not a straight line.",
+            "Straight": "The two sides point in opposite directions, making a straight line."}[kind]
+    steps = ["Compare the angle to a right angle, the corner of a square.", seen,
+             f"So it's {_a(kind)} {kind.lower()} angle. {ANGLES[kind]}"]
+    return _geo(rng, "Geometry: angles", "The angle in the picture is an example of which type of angle?",
+                fig.svg(rng.uniform(-0.6, 0.6)), kind, list(ANGLES), steps,
+                lambda o: f"{ANGLES[o]} That doesn't match this angle.", "A small square marks a right angle.")
+
+
+PAIRS = {
+    "Complementary": "Complementary angles add up to 90°. Side by side, they make a right angle.",
+    "Supplementary": "Supplementary angles add up to 180°. Side by side, they make a straight line.",
+    "Vertical": "Vertical angles are across from each other where two lines cross. They're always equal.",
+    "Corresponding": "Corresponding angles sit in matching spots where one line crosses two parallel lines.",
+}
+
+
+def angle_pairs(rng):
+    kind = rng.choice(["Complementary", "Supplementary", "Vertical"])
+    V = (0, 0)
+
+    def at(deg, r=1.4):
+        return r * math.cos(math.radians(deg)), -r * math.sin(math.radians(deg))
+
+    fig = Fig()
+    if kind == "Complementary":
+        a = rng.randint(25, 65)
+        fig.add("ray", V, at(0)).add("ray", V, at(a)).add("ray", V, at(90))
+        fig.add("angle", V, at(0), at(90), right=True)
+        fig.add("angle", V, at(0), at(a), label=f"{a}°", r=30).add("angle", V, at(a), at(90), label=f"{90 - a}°", r=30)
+        seen = f"Together, {a}° and {90 - a}° fill the right angle (the small square): they add up to 90°."
+    elif kind == "Supplementary":
+        a = rng.choice([rng.randint(35, 75), rng.randint(105, 145)])
+        fig.add("line", at(180), at(0)).add("ray", V, at(a))
+        fig.add("angle", V, at(0), at(a), label=f"{a}°").add("angle", V, at(a), at(180), label=f"{180 - a}°")
+        seen = f"Together, {a}° and {180 - a}° make a straight line: they add up to 180°."
+    else:
+        t = rng.choice([rng.randint(35, 70), rng.randint(110, 145)])
+        fig.add("line", at(180), at(0)).add("line", at(t + 180), at(t))
+        fig.add("angle", V, at(0), at(t), label="1").add("angle", V, at(180), at(t + 180), label="2")
+        seen = "Angles 1 and 2 are across from each other where the two lines cross."
+    fig.add("dot", V)
+
+    def why(o):
+        if o == "Corresponding":
+            return f"{PAIRS[o]} There are no parallel lines in this picture."
+        return f"{PAIRS[o]} That's not what the marked angles show."
+
+    steps = ["Look at how the two marked angles sit next to each other.", seen,
+             f"That makes them {kind.lower()} angles. {PAIRS[kind]}"]
+    return _geo(rng, "Geometry: angle pairs", "The two marked angles are an example of which kind of angle pair?",
+                fig.svg(rng.uniform(-0.5, 0.5)), kind, list(PAIRS), steps, why, None)
+
+
+QUADS = {
+    "Square": "A square has four equal sides and four right angles.",
+    "Rectangle": "A rectangle has four right angles, with opposite sides equal.",
+    "Rhombus": "A rhombus has four equal sides, but its angles don't have to be right angles.",
+    "Parallelogram": "A parallelogram has two pairs of parallel sides.",
+    "Trapezoid": "A trapezoid has exactly one pair of parallel sides.",
+}
+QUAD_PARENTS = {"Square": {"Rectangle", "Rhombus", "Parallelogram"}, "Rectangle": {"Parallelogram"},
+                "Rhombus": {"Parallelogram"}}
+
+
+def quadrilaterals(rng):
+    kind = rng.choice(list(QUADS))
+    fig = Fig()
+    if kind in ("Square", "Rectangle"):
+        w = 1 if kind == "Square" else rng.uniform(1.6, 2.2)
+        A, B, C, D = (0, 0), (w, 0), (w, -1), (0, -1)
+        fig.add("poly", A, B, C, D)
+        for v, p1, p2 in [(A, B, D), (B, C, A), (C, D, B), (D, A, C)]:
+            fig.add("angle", v, p1, p2, right=True)
+        long_n = 1
+        short_n = 1 if kind == "Square" else 2
+        fig.add("ticks", A, B, n=long_n).add("ticks", D, C, n=long_n)
+        fig.add("ticks", B, C, n=short_n).add("ticks", A, D, n=short_n)
+        seen = ("four right angles and four sides with the same tick mark" if kind == "Square"
+                else "four right angles, with opposite sides matching")
+    elif kind == "Rhombus":
+        t = math.radians(rng.uniform(55, 72))
+        A, B, C, D = (0, 0), (1, 0), (1 + math.cos(t), -math.sin(t)), (math.cos(t), -math.sin(t))
+        fig.add("poly", A, B, C, D)
+        for a, b in [(A, B), (B, C), (C, D), (D, A)]:
+            fig.add("ticks", a, b, n=1)
+        seen = "four sides with the same tick mark, and no right angles"
+    elif kind == "Parallelogram":
+        base, t = rng.uniform(1.6, 2.1), math.radians(rng.uniform(55, 72))
+        A, B = (0, 0), (base, 0)
+        C, D = (base + math.cos(t), -math.sin(t)), (math.cos(t), -math.sin(t))
+        fig.add("poly", A, B, C, D)
+        fig.add("par", A, B, n=1).add("par", D, C, n=1).add("par", A, D, n=2).add("par", B, C, n=2)
+        seen = "two pairs of parallel sides (the arrow marks) and no right angles"
+    else:
+        w, w2 = rng.uniform(1.8, 2.2), rng.uniform(0.8, 1.2)
+        x0 = rng.uniform(0.15, w - w2 - 0.15)
+        A, B, C, D = (0, 0), (w, 0), (x0 + w2, -0.9), (x0, -0.9)
+        fig.add("poly", A, B, C, D)
+        fig.add("par", A, B, n=1).add("par", D, C, n=1)
+        seen = "exactly one pair of parallel sides (the arrow marks)"
+
+    def why(o):
+        if o in QUAD_PARENTS.get(kind, ()):
+            return (f"Every {kind.lower()} is also {_a(o)} {o.lower()}, but {kind.lower()} is the more "
+                    f"specific name. {QUADS[kind]}")
+        return f"{QUADS[o]} That doesn't match the marks on this shape."
+
+    steps = ["Tick marks show equal sides, arrow marks show parallel sides, and a small square shows a right angle.",
+             f"This shape has {seen}.",
+             f"The most specific name is {kind.lower()}. {QUADS[kind]}"]
+    return _geo(rng, "Geometry: quadrilaterals", "What is the most specific name for the shape in the picture?",
+                fig.svg(rng.uniform(-0.45, 0.45)), kind, list(QUADS), steps, why,
+                "Tick marks show equal sides, arrow marks show parallel sides, and a small square shows a right angle.")
+
+
+POLY_NAMES = {3: "Triangle", 4: "Quadrilateral", 5: "Pentagon", 6: "Hexagon", 7: "Heptagon", 8: "Octagon",
+              9: "Nonagon", 10: "Decagon"}
+POLY_TIPS = {5: "Penta- means five, like the five-sided Pentagon building.", 6: "Hexa- means six.",
+             7: "Hepta- means seven.", 8: "Octa- means eight, like an octopus's eight arms.",
+             9: "Nona- means nine.", 10: "Deca- means ten, like a decade is ten years."}
+
+
+def polygons(rng):
+    n = rng.randint(5, 10)
+    t0 = rng.uniform(0, 2 * math.pi)
+    pts = [(math.cos(t0 + 2 * math.pi * i / n), math.sin(t0 + 2 * math.pi * i / n)) for i in range(n)]
+    fig = Fig().add("poly", *pts)
+    for p in pts:
+        fig.add("dot", p)
+    name = POLY_NAMES[n]
+    near = sorted((k for k in POLY_NAMES if k != n), key=lambda k: (abs(k - n), k))[:3]
+    sides = {v: k for k, v in POLY_NAMES.items()}
+    steps = [f"Count the sides: this shape has {n}.",
+             f"A polygon with {n} sides is called {_a(name)} {name.lower()}. {POLY_TIPS[n]}"]
+    return _geo(rng, "Geometry: polygons", "What is the name of the shape in the picture?", fig.svg(), name,
+                [name] + [POLY_NAMES[k] for k in near], steps,
+                lambda o: f"{_a(o).capitalize()} {o.lower()} has {sides[o]} sides. This shape has {n}.",
+                "Count the sides.")
+
+
+CIRCLE = {
+    "Radius": "A radius goes from the center of the circle to its edge.",
+    "Diameter": "A diameter goes all the way across the circle, through the center.",
+    "Chord": "A chord connects two points on the circle.",
+    "Tangent": "A tangent touches the circle at exactly one point, from the outside.",
+}
+
+
+def circle_parts(rng):
+    kind = rng.choice(list(CIRCLE))
+    t = rng.uniform(0, 2 * math.pi)
+
+    def on(a):
+        return math.cos(a), -math.sin(a)
+
+    O = (0, 0)
+    fig = Fig().add("circle", O, r=1.0).add("dot", O)
+    if kind == "Radius":
+        ends = [O, on(t)]
+        seen = "It starts at the center dot and stops at the edge of the circle."
+    elif kind == "Diameter":
+        ends = [on(t), on(t + math.pi)]
+        seen = "It goes from one side of the circle to the other, passing through the center dot."
+    elif kind == "Chord":
+        ends = [on(t), on(t + math.radians(rng.uniform(70, 130)))]
+        seen = "It connects two points on the circle, but it doesn't pass through the center."
+    else:
+        p, d = on(t), (math.sin(t), math.cos(t))
+        ends = [(p[0] - d[0] * 0.9, p[1] - d[1] * 0.9), (p[0] + d[0] * 0.9, p[1] + d[1] * 0.9)]
+        seen = "It touches the circle at just one point and stays outside it."
+    fig.add("seg", *ends, cls="hl")
+    for e in ends if kind != "Tangent" else [on(t)]:
+        if e != O:
+            fig.add("dot", e)
+
+    def why(o):
+        if kind == "Diameter" and o == "Chord":
+            return ("A diameter is a special chord: it passes through the center, so diameter is the more "
+                    "specific name.")
+        if kind == "Diameter" and o == "Radius":
+            return "A radius stops at the center. This line goes all the way across."
+        return f"{CIRCLE[o]} That's not what the highlighted line does."
+
+    steps = ["Find the center dot, then look at where the highlighted line starts and ends.", seen,
+             f"So it's {_a(kind)} {kind.lower()}. {CIRCLE[kind]}"]
+    return _geo(rng, "Geometry: circles", "What is the most specific name for the highlighted line?", fig.svg(),
+                kind, list(CIRCLE), steps, why, "The dot in the middle is the center of the circle.")
+
+
+LINES = {
+    "Parallel": "Parallel lines run side by side and never meet, like train tracks.",
+    "Perpendicular": "Perpendicular lines cross at a right angle, marked with a small square.",
+    "Intersecting": "Intersecting lines cross each other at a point.",
+    "Skew": "Skew lines are in 3D space: they never meet and aren't parallel. Two lines drawn flat on a page "
+            "can't be skew.",
+}
+
+
+def lines(rng):
+    kind = rng.choice(["Parallel", "Perpendicular", "Intersecting"])
+    fig = Fig()
+    if kind == "Parallel":
+        s1, s2 = rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3)
+        a, b, c, d = (-1.4 + s1, -0.5), (1.4 + s1, -0.5), (-1.4 + s2, 0.5), (1.4 + s2, 0.5)
+        fig.add("line", a, b).add("line", c, d).add("par", a, b, n=1).add("par", c, d, n=1)
+        seen = "The arrow marks show the lines are parallel: they run side by side and never meet."
+    else:
+        deg = 90 if kind == "Perpendicular" else rng.choice([rng.randint(30, 60), rng.randint(120, 150)])
+        t = math.radians(deg)
+        u = (1.4 * math.cos(t), -1.4 * math.sin(t))
+        fig.add("line", (-1.4, 0), (1.4, 0)).add("line", (-u[0], -u[1]), u)
+        if kind == "Perpendicular":
+            fig.add("angle", (0, 0), (1.4, 0), u, right=True)
+            seen = "The lines cross, and the small square shows they meet at a right angle."
+        else:
+            seen = "The lines cross at one point, and the angle between them isn't a right angle."
+
+    def why(o):
+        if kind == "Perpendicular" and o == "Intersecting":
+            return ("These lines do intersect, but they meet at a right angle (the small square), so "
+                    "perpendicular is the better word.")
+        if o == "Skew":
+            return LINES[o]
+        return f"{LINES[o]} That doesn't match these lines."
+
+    steps = ["Check whether the lines cross, and if they do, whether there's a right-angle square.", seen,
+             f"So they're {kind.lower()} lines. {LINES[kind]}"]
+    return _geo(rng, "Geometry: lines", "Which word best describes the two lines in the picture?",
+                fig.svg(rng.uniform(0, math.pi)), kind, list(LINES), steps, why,
+                "Arrow marks show parallel lines. A small square shows a right angle.")
+
+
+SOLIDS = {
+    "Cube": "A cube has six square faces, and all its edges are the same length.",
+    "Rectangular prism": "A rectangular prism has six rectangle faces, like a box.",
+    "Triangular prism": "A triangular prism has two triangle ends joined by three rectangles.",
+    "Cylinder": "A cylinder has two flat circle ends joined by a curved side, like a can.",
+    "Cone": "A cone has one flat circle base and comes to a point.",
+    "Sphere": "A sphere is perfectly round, like a ball, with no flat faces.",
+    "Square pyramid": "A square pyramid has a square base and four triangle faces that meet at a point.",
+}
+
+
+def _box(fig, w, h, dx, dy):
+    F = [(0, 0), (w, 0), (w, h), (0, h)]
+    fig.add("seg", (0, h), (dx, h - dy), cls="d").add("seg", (dx, h - dy), (w + dx, h - dy), cls="d")
+    fig.add("seg", (dx, h - dy), (dx, -dy), cls="d")
+    fig.add("poly", *F, cls="s")
+    fig.add("poly", (0, 0), (dx, -dy), (w + dx, -dy), (w, 0), cls="s")
+    fig.add("poly", (w, 0), (w + dx, -dy), (w + dx, h - dy), (w, h), cls="s")
+
+
+def solids(rng):
+    kind = rng.choice(list(SOLIDS))
+    fig = Fig()
+    if kind == "Cube":
+        _box(fig, 1, 1, 0.45, 0.35)
+        fig.add("ticks", (0, 1), (1, 1)).add("ticks", (0, 0), (0, 1)).add("ticks", (1, 0), (1.45, -0.35))
+        seen = "It's a box whose edges all have the same tick mark, so every edge is the same length."
+    elif kind == "Rectangular prism":
+        _box(fig, rng.uniform(1.7, 2.2), rng.uniform(0.75, 0.95), 0.5, 0.35)
+        seen = "It's a box shape: six flat rectangle faces, and the edges aren't all the same length."
+    elif kind == "Triangular prism":
+        w, h, dx, dy = 1.1, 0.95, 1.1, 0.35
+        fig.add("seg", (0, h), (dx, h - dy), cls="d").add("seg", (dx, h - dy), (w + dx, h - dy), cls="d")
+        fig.add("seg", (dx, h - dy), (w / 2 + dx, -dy), cls="d")
+        fig.add("poly", (0, h), (w, h), (w / 2, 0), cls="s")
+        fig.add("seg", (w / 2, 0), (w / 2 + dx, -dy)).add("seg", (w, h), (w + dx, h - dy))
+        fig.add("seg", (w / 2 + dx, -dy), (w + dx, h - dy))
+        seen = "Both ends are triangles, joined by flat rectangle sides."
+    elif kind == "Cylinder":
+        rx, ry, h = 0.8, 0.25, 1.4
+        fig.add("ellipse", (0, 0), rx=rx, ry=ry)
+        fig.add("ellipse", (0, h), rx=rx, ry=ry, part="back", cls="d").add("ellipse", (0, h), rx=rx, ry=ry, part="front")
+        fig.add("seg", (-rx, 0), (-rx, h)).add("seg", (rx, 0), (rx, h))
+        seen = "It has two flat circle ends joined by a curved side."
+    elif kind == "Cone":
+        rx, ry = 0.9, 0.28
+        fig.add("ellipse", (0, 0), rx=rx, ry=ry, part="back", cls="d").add("ellipse", (0, 0), rx=rx, ry=ry, part="front")
+        fig.add("seg", (0, -1.5), (-rx, 0)).add("seg", (0, -1.5), (rx, 0))
+        seen = "It has one flat circle base and rises to a single point."
+    elif kind == "Sphere":
+        fig.add("circle", (0, 0), r=1.0)
+        fig.add("ellipse", (0, 0), rx=1.0, ry=0.3, part="back", cls="d").add("ellipse", (0, 0), rx=1.0, ry=0.3, part="front")
+        seen = "It's perfectly round all the way around, with no flat faces or edges."
+    else:
+        FL, FR, BR, BL, T = (-0.9, 0), (0.7, 0), (1.2, -0.4), (-0.4, -0.4), (0.15, -1.5)
+        fig.add("seg", FL, BL, cls="d").add("seg", BL, BR, cls="d").add("seg", T, BL, cls="d")
+        fig.add("seg", FL, FR).add("seg", FR, BR).add("seg", T, FL).add("seg", T, FR).add("seg", T, BR)
+        seen = "It has a square base, and its triangle sides all meet at one point at the top."
+
+    def why(o):
+        if kind == "Cube" and o == "Rectangular prism":
+            return ("Every cube is a rectangular prism, but here all the edges are the same length, so cube is "
+                    "the more specific name.")
+        return f"{SOLIDS[o]} That doesn't match this solid."
+
+    steps = ["Look at the shape of the ends or base, and whether the sides are flat or curved. Dashed lines are "
+             "edges hidden at the back.", seen, f"So it's {_a(kind)} {kind.lower()}. {SOLIDS[kind]}"]
+    return _geo(rng, "Geometry: solids", "What is the name of the solid in the picture?", fig.svg(), kind,
+                list(SOLIDS), steps, why, "Dashed lines are edges hidden at the back of the shape.")
+
+
+GEOMETRY = [triangle_sides, triangle_angles, angle_types, angle_pairs, quadrilaterals, polygons,
+            circle_parts, lines, solids]
+
+
 # ---------------------------------------------------------------- daily rounds
 
 FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions]
@@ -745,6 +1351,7 @@ WORD_PROBLEMS = [word_rate, consecutive, distance]
 GENERATORS = [two_step, both_sides, distribute_solve, inequality, slope, line_equation, evaluate,
               simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]
 ROUND_SIZE, ROUNDS = 5, 2
+BONUS_IDX = ROUND_SIZE * ROUNDS  # the geometry bonus comes after the last round
 
 
 def _draw(rng, pool, used):
@@ -755,8 +1362,9 @@ def _draw(rng, pool, used):
 
 
 def daily_questions(seed):
-    """ROUNDS rounds of ROUND_SIZE questions. Each round has at least one fundamentals question and
-    one word problem; no topic repeats within the day while unused topics remain."""
+    """ROUNDS rounds of ROUND_SIZE questions, then a geometry bonus at BONUS_IDX. Each round has at
+    least one fundamentals question and one word problem; no topic repeats within the day while
+    unused topics remain."""
     rng = random.Random(seed)
     used, plan = set(), []
     # reserve every round's required topics first so earlier fill picks can't use them up
@@ -771,6 +1379,9 @@ def daily_questions(seed):
         q = g(random.Random(f"{seed}:{i}"))
         q["category"] = "fundamentals" if g in FUNDAMENTALS else "word" if g in WORD_PROBLEMS else "core"
         out.append(q)
+    bonus = rng.choice(GEOMETRY)(random.Random(f"{seed}:bonus"))
+    bonus["category"] = "bonus"
+    out.append(bonus)
     return out
 
 

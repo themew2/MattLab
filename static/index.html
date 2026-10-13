@@ -15,6 +15,7 @@
     --hl: #FFE14D;
     --good: #2F7D57;
     --bad: #B8402E;
+    --accent: #2B6CD9;
     --silver: #C3CAD4; --silver-edge: #7C8696;
     --gold: #F2C230; --gold-edge: #A87F00;
     --platinum: #AEBBF2; --platinum-edge: #5363A8;
@@ -127,6 +128,19 @@
   .legend { color: var(--graphite); font-size: .85rem; display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 0; }
   .legend > span { display: inline-flex; gap: 4px; align-items: center; }
   .player .stars { margin-left: 6px; }
+
+  /* geometry bonus */
+  .figure { margin: -8px 0 20px; max-width: 360px; }
+  .figure svg { width: 100%; height: auto; display: block; }
+  .geo .s { fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  .geo .fill { fill: #EEF3FA; }
+  .geo .d { fill: none; stroke: var(--graphite); stroke-width: 1.8; stroke-dasharray: 6 5; }
+  .geo .m { fill: none; stroke: var(--graphite); stroke-width: 1.8; stroke-linecap: round; }
+  .geo .hl { stroke: var(--accent); stroke-width: 4.5; stroke-linecap: round; }
+  .geo .dot { fill: var(--ink); }
+  .geo .lbl { font: 600 13px var(--sans); fill: var(--ink); }
+  .bonus-offer { margin-top: 18px; padding: 16px 18px; background: #FFF8D6; border: 1.5px solid var(--gold); border-radius: 6px; }
+  .bonus-offer p { margin: 0 0 12px; }
 
   @media (max-width: 520px) {
     .sheet { padding: 20px 16px; }
@@ -261,7 +275,11 @@ const roundQs = r => state.questions.slice(r * RS(), (r + 1) * RS());
 const firstOpen = r => roundQs(r).find(q => q.status === "open");
 const started = r => roundQs(r).some(q => q.status !== "open");
 const halfSkipUsed = r => roundQs(r).some(q => q.status === "skipped" && q.points > 0);
-const visibleRounds = () => [...Array(state.rounds).keys()].filter(r => r === 0 || started(r));
+const isBonus = r => r === state.rounds;  // the bonus sits after the last round, as its own one-question "round"
+const bonusQ = () => state.questions[state.rounds * RS()];
+const visibleRounds = () => [...Array(state.rounds).keys()].filter(r => r === 0 || started(r))
+  .concat(bonusQ() ? [state.rounds] : []);
+const resetTime = () => new Date(state.next_reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function pickView() {
   // the first open question in a round the player has reached; otherwise the latest results screen
@@ -270,7 +288,9 @@ function pickView() {
     const open = firstOpen(r);
     if (open) { view = { round: r, idx: open.idx }; return; }
   }
-  view = { round: Math.ceil(state.questions.length / RS()) - 1, idx: null };
+  const b = bonusQ();
+  const lastRound = Math.min(state.rounds, Math.ceil(state.questions.length / RS())) - 1;
+  view = { round: b && b.status !== "open" ? state.rounds : lastRound, idx: null };  // open bonus: offered on the results screen
 }
 
 function openRound(r) {
@@ -305,15 +325,17 @@ function render() {
 
   const shown = visibleRounds();
   const tabs = shown.length > 1 ? h("div", { class: "tabs" }, shown.map(i =>
-    h("button", { class: "tab", "aria-pressed": String(i === r), onclick: () => openRound(i) }, `Round ${i + 1}`))) : null;
+    h("button", { class: "tab", "aria-pressed": String(i === r), onclick: () => openRound(i) },
+      isBonus(i) ? "Bonus" : `Round ${i + 1}`))) : null;
   const cells = h("div", { class: "cells", role: "list" }, qs.map((q, i) =>
     h("button", {
       class: `cell ${q.status}${q.idx === view.idx ? " current" : ""}`, role: "listitem",
       "aria-label": `Question ${i + 1}, ${q.status === "open" ? "not answered" : q.status}`,
       onclick: () => { view = { round: r, idx: q.idx }; render(); },
     }, String(i + 1))));
-  const line = h("p", { class: "status-line" },
-    `Round ${r + 1} of ${state.rounds}: ${finished} of ${RS()} done, ${correct} correct. ${state.totals.today} points today.`);
+  const line = h("p", { class: "status-line" }, isBonus(r)
+    ? `Bonus question: worth ${state.bonus_points} points. One try, no skips. ${state.totals.today} points today.`
+    : `Round ${r + 1} of ${state.rounds}: ${finished} of ${RS()} done, ${correct} correct. ${state.totals.today} points today.`);
 
   const body = view.idx == null ? renderRoundEnd(r) : renderQuestion(state.questions[view.idx]);
   app.replaceChildren(...[tabs, cells, line, body].filter(Boolean));
@@ -325,9 +347,16 @@ function renderQuestion(q) {
   const err = h("p", { class: "error", role: "alert" });
   const isLong = q.prompt.length > 90;
   const pos = q.idx % RS();
+  const bonus = isBonus(roundOf(q.idx));
   const sheet = h("section", { class: "sheet", "aria-labelledby": "qprompt" },
-    h("div", { class: "meta" }, h("span", {}, q.topic), h("span", {}, `Question ${pos + 1} of ${RS()}`)),
+    h("div", { class: "meta" }, h("span", {}, q.topic),
+      h("span", {}, bonus ? `Bonus: ${state.bonus_points} points` : `Question ${pos + 1} of ${RS()}`)),
     h("p", { class: `prompt${isLong ? " long" : ""}`, id: "qprompt" }, q.prompt));
+  if (q.figure) {
+    const fig = h("div", { class: "figure" });
+    fig.innerHTML = q.figure;  // server-drawn SVG built from fixed templates, never from user input
+    sheet.append(fig);
+  }
 
   if (q.status === "open") {
     sheet.append(q.kind === "mc" ? mcControls(q, err) : inputControls(q, err), err);
@@ -343,7 +372,7 @@ function renderQuestion(q) {
   sheet.append(h("div", { class: "nav" },
     h("button", { class: "btn ghost", disabled: pos === 0, onclick: () => { view.idx = q.idx - 1; render(); } }, "Previous"),
     h("button", { class: "btn ghost", onclick: () => { view.idx = next; render(); } },
-      roundOpen ? "Next question" : next == null ? "See round results" : "Next")));
+      roundOpen ? "Next question" : next == null ? (bonus ? "See results" : "See round results") : "Next")));
   return sheet;
 }
 
@@ -389,7 +418,8 @@ function mcControls(q, err) {
   }, c));
   return h("div", {},
     h("div", { class: "choices", role: "group", "aria-label": "Answer choices" }, buttons),
-    h("div", { class: "answer-row" }, check, skipButton(q, err)));
+    h("div", { class: "answer-row" }, check, q.category === "bonus" ? null : skipButton(q, err)),
+    q.hint ? h("p", { class: "hint" }, q.hint) : null);
 }
 
 function mcReview(q) {
@@ -457,32 +487,64 @@ async function skip(q, err) {
 async function applyResult(d) {
   state.questions[d.question.idx] = d.question;
   state.totals = d.totals;
-  // finishing a round unlocks the next one on the server; fetch it so "Play again" has questions
-  if (!firstOpen(roundOf(d.question.idx)) && state.questions.length < state.rounds * RS()) {
+  // finishing a round unlocks the next one (or, after a perfect day, the bonus) on the server
+  if (!firstOpen(roundOf(d.question.idx)) && !isBonus(roundOf(d.question.idx))) {
     try { state = await api("/api/today"); } catch {}
   }
   render();
 }
 
 function renderRoundEnd(r) {
+  if (isBonus(r)) return renderBonusEnd();
   const qs = roundQs(r);
   const pts = qs.reduce((sum, q) => sum + (q.points || 0), 0);
   const correct = qs.filter(q => q.status === "correct").length;
   const nextR = r + 1;
   const canPlay = nextR < state.rounds && roundQs(nextR).length > 0;
-  const lastPlayable = !canPlay;
-  const resetAt = new Date(state.next_reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const total = state.rounds * RS();
+  const b = r === state.rounds - 1 ? bonusQ() : null;
+  const perfect = state.questions.slice(0, total).every(q => q.status === "correct");
+  const done = !canPlay && !(b && b.status === "open");
+  let extra = null;
+  if (r === state.rounds - 1) {
+    if (b && b.status === "open")
+      extra = h("div", { class: "bonus-offer" },
+        h("p", {}, h("b", {}, "Perfect day! "), `All ${total} correct with no skips. You've unlocked a geometry ` +
+          `bonus question worth ${state.bonus_points} points. You get one try, and it can't be skipped.`),
+        h("button", { class: "btn", "data-autofocus": true, onclick: () => openRound(state.rounds) }, "Try the bonus question"));
+    else if (b)
+      extra = h("div", { class: "answer-row", style: "margin-top:16px" },
+        h("button", { class: "btn ghost", onclick: () => openRound(state.rounds) }, "See the bonus question"));
+    else if (!perfect)
+      extra = h("p", { class: "status-line", style: "margin-top:12px" },
+        `Get all ${total} right with no skips to unlock a ${state.bonus_points}-point bonus question.`);
+  }
   const sec = h("section", { class: "sheet" },
-    h("h2", {}, lastPlayable ? "That's all for today" : `Round ${r + 1} done`),
+    h("h2", {}, done ? "That's all for today" : `Round ${r + 1} done`),
     h("p", { class: "done-score" }, h("span", { class: "score" }, `${pts} points`)),
-    h("p", { class: "status-line" }, `${correct} of ${qs.length} correct this round.` + (lastPlayable
-      ? ` You've played all ${state.rounds * RS()} of today's questions. New questions at ${resetAt}.`
+    h("p", { class: "status-line" }, `${correct} of ${qs.length} correct this round.` + (done
+      ? ` You've played all ${total} of today's questions. New questions at ${resetTime()}.`
       : "")),
     canPlay ? h("div", { class: "answer-row", style: "margin-top:16px" },
       h("button", { class: "btn", "data-autofocus": true, onclick: () => openRound(nextR) },
         started(nextR) ? `Back to round ${nextR + 1}` : "Play again")) : null,
+    extra,
     h("p", { class: "status-line", style: "margin-top:16px" }, "Tap any square above to review a question and its solution."));
   getPlayers().then(ps => { const b = leaderboard(ps, state && state.name); if (b) sec.append(b); });
+  return sec;
+}
+
+function renderBonusEnd() {
+  const b = bonusQ();
+  const sec = h("section", { class: "sheet" },
+    h("h2", {}, "That's all for today"),
+    h("p", { class: "done-score" }, h("span", { class: "score" }, `${b.points} points`)),
+    h("p", { class: "status-line" }, (b.status === "correct"
+      ? "You got the bonus question right."
+      : "The bonus question didn't go your way this time, but getting here took a perfect day.") +
+      ` New questions at ${resetTime()}.`),
+    h("p", { class: "status-line", style: "margin-top:16px" }, "Tap the square above to review the bonus question."));
+  getPlayers().then(ps => { const lb = leaderboard(ps, state && state.name); if (lb) sec.append(lb); });
   return sec;
 }
 

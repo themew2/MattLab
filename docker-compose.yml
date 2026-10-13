@@ -5,9 +5,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      TZ: UTC                    # decides when "today" rolls over (midnight UTC = 8pm EDT / 7pm EST)
+      RESET_HOUR_UTC: "16"       # new questions daily at this hour UTC (16 = noon EDT / 11am EST)
       DATA_DIR: /data            # must match the volume mount below
       POINTS_PER_CORRECT: "10"   # the first skip in each round earns half of this
+      BONUS_POINTS: "100"        # the geometry bonus question after a perfect day
       SHARED_QUESTIONS: "0"      # "1" = everyone gets the same set each day
     volumes:
       # the project's ./data folder, so the container and a local `gunicorn` run share one database
