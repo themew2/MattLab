@@ -1382,7 +1382,21 @@ def daily_questions(seed):
     bonus = rng.choice(GEOMETRY)(random.Random(f"{seed}:bonus"))
     bonus["category"] = "bonus"
     out.append(bonus)
+    _balance_answers(out, random.Random(f"{seed}:slots"))
     return out
+
+
+def _balance_answers(qs, rng):
+    """Deal the right answer's position like a shuffled deck, so each choice slot gets about the same
+    share across the day. Shuffling each question on its own can put it first five times in a row."""
+    mcs = [q for q in qs if q["kind"] == "mc"]
+    deck = [slot for _ in range(-(-len(mcs) // 4)) for slot in range(4)]
+    rng.shuffle(deck)
+    for q, slot in zip(mcs, deck):
+        others = [c for c in q["choices"] if c != q["answer_text"]]
+        slot = min(slot, len(others))
+        q["choices"] = others[:slot] + [q["answer_text"]] + others[slot:]
+        q["answer_index"] = slot
 
 
 # ---------------------------------------------------------------- grading
