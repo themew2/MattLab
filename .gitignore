@@ -1,0 +1,6 @@
+# live data: players, scores, and the session/seed secret. Never commit.
+data/
+
+__pycache__/
+*.pyc
+.venv/

@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily Algebra</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231D2B4A'/><text x='16' y='23' font-family='Georgia' font-style='italic' font-size='20' fill='%23FFE14D' text-anchor='middle'>x</text></svg>">
+<style>
+  :root {
+    --paper: #F4F7FB;
+    --grid: rgba(56, 96, 156, .075);
+    --ink: #1D2B4A;
+    --graphite: #5A6577;
+    --rule: #CBD6E4;
+    --hl: #FFE14D;
+    --good: #2F7D57;
+    --bad: #B8402E;
+    --silver: #C3CAD4; --silver-edge: #7C8696;
+    --gold: #F2C230; --gold-edge: #A87F00;
+    --platinum: #AEBBF2; --platinum-edge: #5363A8;
+    --diamond: #6FD6F2; --diamond-edge: #1B86A8;
+    --serif: "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0; min-height: 100vh; color: var(--ink); font: 16px/1.5 var(--sans);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 20px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font: italic 600 1.6rem/1 var(--serif); margin: 0; letter-spacing: -.01em; }
+  .who { display: flex; align-items: baseline; gap: 14px; color: var(--graphite); }
+  .score { font: 700 1.05rem var(--serif); color: var(--ink); padding: 0 .3em;
+           background: linear-gradient(transparent 45%, var(--hl) 45%, var(--hl) 92%, transparent 92%); }
+  button { font: inherit; cursor: pointer; border-radius: 6px; }
+  .link { background: none; border: 0; color: var(--graphite); text-decoration: underline; padding: 0; }
+  .btn { border: 1.5px solid var(--ink); background: var(--ink); color: #fff; padding: .55em 1.1em; font-weight: 600; }
+  .btn.ghost { background: transparent; color: var(--ink); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 3px solid var(--hl); outline-offset: 2px; }
+
+  /* progress: one graph cell per question */
+  .cells { display: flex; gap: 6px; margin: 28px 0 6px; flex-wrap: wrap; }
+  .cell { width: 34px; height: 34px; border: 1.5px solid var(--rule); background: #fff; border-radius: 4px;
+          font: 600 .85rem var(--sans); color: var(--graphite); display: grid; place-items: center; padding: 0; }
+  .cell.correct { background: var(--good); border-color: var(--good); color: #fff; }
+  .cell.wrong { background: #fff; border-color: var(--bad); color: var(--bad); }
+  .cell.skipped { background: repeating-linear-gradient(135deg, #fff 0 4px, var(--rule) 4px 6px); }
+  .cell.current { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+  .status-line { color: var(--graphite); font-size: .92rem; margin: 0; }
+
+  .sheet { background: #fff; border: 1px solid var(--rule); border-left: 4px solid var(--ink);
+           padding: 28px 28px 24px; margin-top: 20px; }
+  .meta { display: flex; justify-content: space-between; color: var(--graphite); font-size: .9rem; }
+  .prompt { font: 400 1.65rem/1.45 var(--serif); white-space: pre-line; margin: 14px 0 22px; max-width: 34ch; }
+  .prompt.long { font-size: 1.3rem; max-width: 46ch; line-height: 1.55; }
+
+  .answer-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .answer-row input { font: 1.2rem var(--serif); padding: .45em .6em; width: 12em; max-width: 100%;
+                      border: 1.5px solid var(--rule); border-bottom: 2px solid var(--ink); border-radius: 6px 6px 0 0; }
+  .hint { color: var(--graphite); font-size: .88rem; margin: 8px 0 0; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .choice { text-align: left; font: 1.15rem var(--serif); padding: .7em .9em; background: #fff;
+            border: 1.5px solid var(--rule); color: var(--ink); }
+  .choice:hover:not(:disabled) { border-color: var(--ink); }
+  .choice[aria-pressed="true"] { border-color: var(--ink); background: #EEF3FA; }
+  .choice.is-answer { border-color: var(--good); box-shadow: inset 4px 0 0 var(--good); }
+  .choice.is-wrong { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }
+  .choice:disabled { cursor: default; }
+
+  .verdict { margin: 18px 0 0; font-weight: 600; }
+  .verdict.correct { color: var(--good); }
+  .verdict.wrong { color: var(--bad); }
+  .verdict.skipped { color: var(--graphite); }
+  .verdict b { font: 700 1.1rem var(--serif); color: var(--ink); }
+
+  .explain { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--rule); }
+  .explain-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  ol.steps { margin: 16px 0 0; padding-left: 1.6em; font: 1.08rem/1.6 var(--serif); }
+  ol.steps li { padding: 4px 6px; margin-bottom: 4px; }
+  ol.steps li.new { background: linear-gradient(90deg, rgba(255,225,77,.55), rgba(255,225,77,.55)) no-repeat 0 0 / 100% 100%;
+                    animation: swipe .45s ease-out; }
+  @keyframes swipe { from { background-size: 0 100%; } }
+  @media (prefers-reduced-motion: reduce) { ol.steps li.new { animation: none; } }
+
+  .nav { display: flex; justify-content: space-between; margin-top: 18px; }
+  .error { color: var(--bad); font-size: .92rem; min-height: 1.4em; margin: 8px 0 0; }
+
+  /* sign-in */
+  .players { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 26px; }
+  .player { background: #fff; border: 1.5px solid var(--rule); padding: .6em 1em; text-align: left; color: var(--ink); }
+  .player:hover { border-color: var(--ink); }
+  .player small { display: block; color: var(--graphite); }
+  h2 { font: 600 1.4rem var(--serif); margin: 0 0 4px; }
+  .welcome { font: italic 600 2rem/1.2 var(--serif); margin: 0 0 18px; letter-spacing: -.01em;
+             padding-bottom: 14px; border-bottom: 1px dashed var(--rule); }
+  table.board { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  table.board td, table.board th { padding: 6px 4px; border-bottom: 1px solid var(--rule); text-align: left; }
+  table.board th { font-weight: 600; color: var(--graphite); font-size: .9rem; }
+  table.board td.num, table.board th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .done-score { font: 600 3rem/1 var(--serif); margin: 12px 0; }
+
+  /* rounds */
+  .tabs { display: flex; gap: 8px; margin-top: 24px; }
+  .tabs + .cells { margin-top: 12px; }
+  .tab { border: 1.5px solid var(--rule); background: #fff; color: var(--ink); padding: .3em .9em;
+         font-weight: 600; font-size: .9rem; }
+  .tab[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+  .mistake { margin: 10px 0 0; background: #FDF1EE; border-left: 3px solid var(--bad); padding: 8px 12px; }
+
+  /* leaderboard + stars */
+  h3 { font: 600 1.15rem var(--serif); margin: 28px 0 0; }
+  table.board tr.me td { background: #FFF8D6; font-weight: 600; }
+  .stars { display: inline-flex; gap: 2px; align-items: center; flex-wrap: wrap; vertical-align: middle; }
+  .star svg { width: 18px; height: 18px; display: block; }
+  .star path { stroke-width: 1.3; stroke-linejoin: round; }
+  .star.silver path { fill: var(--silver); stroke: var(--silver-edge); }
+  .star.gold path { fill: var(--gold); stroke: var(--gold-edge); }
+  .star.platinum path { fill: var(--platinum); stroke: var(--platinum-edge); }
+  .star.diamond path { fill: var(--diamond); stroke: var(--diamond-edge); }
+  .star-count { font-size: .85rem; color: var(--graphite); margin: 0 4px 0 1px; }
+  .legend { color: var(--graphite); font-size: .85rem; display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 0; }
+  .legend > span { display: inline-flex; gap: 4px; align-items: center; }
+  .player .stars { margin-left: 6px; }
+
+  @media (max-width: 520px) {
+    .sheet { padding: 20px 16px; }
+    .prompt { font-size: 1.4rem; }
+    .prompt.long { font-size: 1.15rem; }
+    .cell { width: 30px; height: 30px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Daily Algebra</h1>
+    <div class="who" id="who" hidden>
+      <span id="who-name"></span>
+      <span class="score" id="who-total"></span>
+      <span id="who-stars"></span>
+      <button class="link" id="switch">Switch player</button>
+    </div>
+  </header>
+  <main id="app"></main>
+</div>
+
+<script>
+const $ = (sel, el = document) => el.querySelector(sel);
+const app = $("#app");
+let state = null;              // payload from /api/today
+let view = { round: 0, idx: null };  // idx null = the round's results screen
+let revealed = {};             // idx -> {steps, shown}; reset in load() so it never leaks across players or days
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, "");
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) el.append(kid);
+  return el;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showLogin(); throw new Error(data.error); }
+  // the day rolled over since this page loaded; a full reload also picks up any new deploy
+  if (data.stale) { location.reload(); throw new Error(data.error); }
+  if (!res.ok) throw new Error(data.error || `Server returned ${res.status}.`);
+  return data;
+}
+
+/* ------------------------------------------------------------ stars + leaderboard */
+
+const SHAPES = {
+  star: "M12 2.5l2.8 6.1 6.7.7-5 4.5 1.4 6.6L12 17l-5.9 3.4 1.4-6.6-5-4.5 6.7-.7z",
+  diamond: "M12 2.5l8.5 7.5L12 21.5 3.5 10z",
+};
+const LEVELS = [["diamond", 2700], ["platinum", 900], ["gold", 300], ["silver", 100]];
+
+function icon(level) {
+  const s = h("span", { class: `star ${level}` });
+  s.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${level === "diamond" ? SHAPES.diamond : SHAPES.star}"/></svg>`;
+  return s;
+}
+
+function starIcons(stars) {
+  const kids = [], words = [];
+  for (const [level] of LEVELS) {
+    const n = stars[level];
+    if (!n) continue;
+    words.push(`${n} ${level}`);
+    if (n > 3) kids.push(icon(level), h("span", { class: "star-count" }, `×${n}`));
+    else for (let i = 0; i < n; i++) kids.push(icon(level));
+  }
+  return h("span", { class: "stars", role: "img", "aria-label": words.length ? words.join(", ") : "no stars yet" }, kids);
+}
+
+function leaderboard(players, me) {
+  if (!players.length) return null;
+  const rank = p => 1 + players.filter(o => o.total > p.total).length;
+  return h("div", {},
+    h("h3", {}, "Leaderboard"),
+    h("table", { class: "board" },
+      h("thead", {}, h("tr", {}, h("th", { class: "num" }, "#"), h("th", {}, "Player"), h("th", {}, "Stars"),
+        h("th", { class: "num" }, "Today"), h("th", { class: "num" }, "All time"))),
+      h("tbody", {}, players.map(p => h("tr", { class: p.name === me ? "me" : "" },
+        h("td", { class: "num" }, String(rank(p))), h("td", {}, p.name), h("td", {}, starIcons(p.stars)),
+        h("td", { class: "num" }, String(p.today)), h("td", { class: "num" }, String(p.total)))))),
+    h("p", { class: "legend" }, LEVELS.slice().reverse().map(([level, pts]) =>
+      h("span", {}, icon(level), `${level} = ${pts.toLocaleString()} pts`))));
+}
+
+const getPlayers = () => fetch("/api/players").then(r => r.json()).catch(() => []);
+
+/* ------------------------------------------------------------ sign-in */
+
+async function showLogin() {
+  state = null;
+  $("#who").hidden = true;
+  const players = await getPlayers();
+  const err = h("p", { class: "error", role: "alert" });
+  const input = h("input", { id: "newname", maxlength: 32, autocomplete: "off", placeholder: "Your name" });
+  const go = async name => {
+    try { await api("/api/login", { name }); load(); }
+    catch (e) { err.textContent = e.message; }
+  };
+  app.replaceChildren(h("section", { class: "sheet" },
+    h("p", { class: "welcome" }, "Welcome to MattLab"),
+    h("h2", {}, "Who's practicing?"),
+    players.length
+      ? h("div", { class: "players" }, players.map(p =>
+          h("button", { class: "player", onclick: () => go(p.name) },
+            p.name, h("small", {}, `${p.total} points`, starIcons(p.stars)))))
+      : h("p", { class: "status-line" }, "No players yet. Add the first one below."),
+    h("label", { for: "newname", class: "status-line" }, "New player"),
+    h("div", { class: "answer-row", style: "margin-top:6px" },
+      input,
+      h("button", { class: "btn", onclick: () => go(input.value) }, "Start practicing")),
+    err,
+    leaderboard(players, null)));
+  input.addEventListener("keydown", e => { if (e.key === "Enter") go(input.value); });
+}
+
+/* ------------------------------------------------------------ rounds */
+
+const RS = () => state.round_size;
+const roundOf = i => Math.floor(i / RS());
+const roundQs = r => state.questions.slice(r * RS(), (r + 1) * RS());
+const firstOpen = r => roundQs(r).find(q => q.status === "open");
+const started = r => roundQs(r).some(q => q.status !== "open");
+const halfSkipUsed = r => roundQs(r).some(q => q.status === "skipped" && q.points > 0);
+const visibleRounds = () => [...Array(state.rounds).keys()].filter(r => r === 0 || started(r));
+
+function pickView() {
+  // the first open question in a round the player has reached; otherwise the latest results screen
+  for (let r = 0; r < state.rounds && roundQs(r).length; r++) {
+    if (r > 0 && !started(r)) { view = { round: r - 1, idx: null }; return; }  // offers "Play again"
+    const open = firstOpen(r);
+    if (open) { view = { round: r, idx: open.idx }; return; }
+  }
+  view = { round: Math.ceil(state.questions.length / RS()) - 1, idx: null };
+}
+
+function openRound(r) {
+  const open = firstOpen(r);
+  view = { round: r, idx: open ? open.idx : null };
+  render();
+}
+
+/* ------------------------------------------------------------ main view */
+
+async function load() {
+  try { state = await api("/api/today"); }
+  catch { return; }
+  revealed = {};
+  pickView();
+  render();
+}
+
+function renderHeader() {
+  $("#who").hidden = false;
+  $("#who-name").textContent = state.name;
+  $("#who-total").textContent = `${state.totals.total} pts`;
+  $("#who-stars").replaceChildren(starIcons(state.totals.stars));
+}
+
+function render() {
+  renderHeader();
+  const r = view.round;
+  const qs = roundQs(r);
+  const finished = qs.filter(q => q.status !== "open").length;
+  const correct = qs.filter(q => q.status === "correct").length;
+
+  const shown = visibleRounds();
+  const tabs = shown.length > 1 ? h("div", { class: "tabs" }, shown.map(i =>
+    h("button", { class: "tab", "aria-pressed": String(i === r), onclick: () => openRound(i) }, `Round ${i + 1}`))) : null;
+  const cells = h("div", { class: "cells", role: "list" }, qs.map((q, i) =>
+    h("button", {
+      class: `cell ${q.status}${q.idx === view.idx ? " current" : ""}`, role: "listitem",
+      "aria-label": `Question ${i + 1}, ${q.status === "open" ? "not answered" : q.status}`,
+      onclick: () => { view = { round: r, idx: q.idx }; render(); },
+    }, String(i + 1))));
+  const line = h("p", { class: "status-line" },
+    `Round ${r + 1} of ${state.rounds}: ${finished} of ${RS()} done, ${correct} correct. ${state.totals.today} points today.`);
+
+  const body = view.idx == null ? renderRoundEnd(r) : renderQuestion(state.questions[view.idx]);
+  app.replaceChildren(...[tabs, cells, line, body].filter(Boolean));
+  const focus = $("[data-autofocus]", app);
+  if (focus) focus.focus();
+}
+
+function renderQuestion(q) {
+  const err = h("p", { class: "error", role: "alert" });
+  const isLong = q.prompt.length > 90;
+  const pos = q.idx % RS();
+  const sheet = h("section", { class: "sheet", "aria-labelledby": "qprompt" },
+    h("div", { class: "meta" }, h("span", {}, q.topic), h("span", {}, `Question ${pos + 1} of ${RS()}`)),
+    h("p", { class: `prompt${isLong ? " long" : ""}`, id: "qprompt" }, q.prompt));
+
+  if (q.status === "open") {
+    sheet.append(q.kind === "mc" ? mcControls(q, err) : inputControls(q, err), err);
+  } else {
+    if (q.kind === "mc") sheet.append(mcReview(q));
+    sheet.append(verdict(q));
+    if (q.mistake) sheet.append(h("p", { class: "mistake" }, h("b", {}, `Why not ${q.given}? `), q.mistake));
+    sheet.append(explainBlock(q));
+  }
+
+  const next = nextInRound(q.idx);
+  const roundOpen = !!firstOpen(view.round);
+  sheet.append(h("div", { class: "nav" },
+    h("button", { class: "btn ghost", disabled: pos === 0, onclick: () => { view.idx = q.idx - 1; render(); } }, "Previous"),
+    h("button", { class: "btn ghost", onclick: () => { view.idx = next; render(); } },
+      roundOpen ? "Next question" : next == null ? "See round results" : "Next")));
+  return sheet;
+}
+
+function nextInRound(from) {
+  // the next open question in this round (wrapping), else the next one in order, else the results screen
+  const qs = roundQs(roundOf(from));
+  const pos = qs.findIndex(q => q.idx === from);
+  for (let k = 1; k < qs.length; k++) {
+    const q = qs[(pos + k) % qs.length];
+    if (q.status === "open") return q.idx;
+  }
+  return pos + 1 < qs.length ? qs[pos + 1].idx : null;
+}
+
+function skipButton(q, err) {
+  const half = state.half_skip > 0 && !halfSkipUsed(roundOf(q.idx));
+  return h("button", { class: "btn ghost", onclick: () => skip(q, err) },
+    half ? `Skip (+${state.half_skip} pts, once per round)` : "Skip (0 pts)");
+}
+
+function inputControls(q, err) {
+  const input = h("input", { inputmode: "text", autocomplete: "off", "aria-label": "Your answer",
+                             "aria-describedby": "hint", "data-autofocus": true });
+  const submit = () => send(q, { answer: input.value }, err);
+  input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+  return h("div", {},
+    h("div", { class: "answer-row" }, input,
+      h("button", { class: "btn", onclick: submit }, "Check answer"),
+      skipButton(q, err)),
+    q.hint ? h("p", { class: "hint", id: "hint" }, q.hint) : null);
+}
+
+function mcControls(q, err) {
+  let picked = null;
+  const check = h("button", { class: "btn", disabled: true, onclick: () => send(q, { choice: picked }, err) }, "Check answer");
+  const buttons = q.choices.map((c, i) => h("button", {
+    class: "choice", "aria-pressed": "false", "data-autofocus": i === 0 ? true : null,
+    onclick: e => {
+      picked = i;
+      buttons.forEach(b => b.setAttribute("aria-pressed", String(b === e.currentTarget)));
+      check.disabled = false;
+    },
+  }, c));
+  return h("div", {},
+    h("div", { class: "choices", role: "group", "aria-label": "Answer choices" }, buttons),
+    h("div", { class: "answer-row" }, check, skipButton(q, err)));
+}
+
+function mcReview(q) {
+  return h("div", { class: "choices" }, q.choices.map(c => h("button", {
+    class: `choice${c === q.correct_answer ? " is-answer" : ""}${c === q.given && q.status === "wrong" ? " is-wrong" : ""}`,
+    disabled: true,
+  }, c)));
+}
+
+function verdict(q) {
+  const ans = h("b", {}, q.correct_answer);
+  if (q.status === "correct")
+    return h("p", { class: "verdict correct" }, `Correct. +${q.points} points. The answer is `, ans, ".");
+  if (q.status === "wrong")
+    return h("p", { class: "verdict wrong" }, `Not this time. You answered ${q.given}; the answer is `, ans, ".");
+  if (q.points > 0)
+    return h("p", { class: "verdict skipped" }, `Skipped. +${q.points} points for this round's half-point skip. The answer is `, ans, ".");
+  return h("p", { class: "verdict skipped" }, "Skipped. The answer is ", ans, ".");
+}
+
+function explainBlock(q) {
+  const box = h("div", { class: "explain" });
+  const r = revealed[q.idx];
+  const list = h("ol", { class: "steps" });
+  const draw = (fresh) => {
+    const rr = revealed[q.idx];
+    list.replaceChildren(...rr.steps.slice(0, rr.shown).map((s, i) =>
+      h("li", { class: fresh && i === rr.shown - 1 ? "new" : "" }, s)));
+    actions.replaceChildren(...controls());
+  };
+  const fetchSteps = async () => {
+    if (!revealed[q.idx]) {
+      const d = await api(`/api/explain/${q.idx}?day=${encodeURIComponent(state.day)}`);
+      revealed[q.idx] = { steps: d.steps, shown: 0 };
+    }
+    return revealed[q.idx];
+  };
+  const step = async () => { const rr = await fetchSteps(); rr.shown = Math.min(rr.shown + 1, rr.steps.length); draw(true); };
+  const all = async () => { const rr = await fetchSteps(); rr.shown = rr.steps.length; draw(false); };
+  const controls = () => {
+    const rr = revealed[q.idx];
+    if (rr && rr.shown >= rr.steps.length) return [];
+    const started = rr && rr.shown > 0;
+    return [
+      h("button", { class: "btn", onclick: step, "data-autofocus": true },
+        started ? `Next step (${rr.shown + 1} of ${rr.steps.length})` : "Walk me through it"),
+      h("button", { class: "btn ghost", onclick: all }, "Show the full solution"),
+    ];
+  };
+  const actions = h("div", { class: "explain-actions" }, ...(q.auto_explain && !r ? [] : controls()));
+  box.append(actions, list);
+  if (r && r.shown) draw(false);
+  else if (q.auto_explain) all().catch(() => actions.replaceChildren(...controls()));
+  return box;
+}
+
+async function send(q, payload, err) {
+  try { await applyResult(await api("/api/answer", { day: state.day, idx: q.idx, ...payload })); }
+  catch (e) { err.textContent = e.message; }
+}
+async function skip(q, err) {
+  try { await applyResult(await api("/api/skip", { day: state.day, idx: q.idx })); }
+  catch (e) { err.textContent = e.message; }
+}
+async function applyResult(d) {
+  state.questions[d.question.idx] = d.question;
+  state.totals = d.totals;
+  // finishing a round unlocks the next one on the server; fetch it so "Play again" has questions
+  if (!firstOpen(roundOf(d.question.idx)) && state.questions.length < state.rounds * RS()) {
+    try { state = await api("/api/today"); } catch {}
+  }
+  render();
+}
+
+function renderRoundEnd(r) {
+  const qs = roundQs(r);
+  const pts = qs.reduce((sum, q) => sum + (q.points || 0), 0);
+  const correct = qs.filter(q => q.status === "correct").length;
+  const nextR = r + 1;
+  const canPlay = nextR < state.rounds && roundQs(nextR).length > 0;
+  const lastPlayable = !canPlay;
+  const resetAt = new Date(state.next_reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const sec = h("section", { class: "sheet" },
+    h("h2", {}, lastPlayable ? "That's all for today" : `Round ${r + 1} done`),
+    h("p", { class: "done-score" }, h("span", { class: "score" }, `${pts} points`)),
+    h("p", { class: "status-line" }, `${correct} of ${qs.length} correct this round.` + (lastPlayable
+      ? ` You've played all ${state.rounds * RS()} of today's questions. New questions at ${resetAt}.`
+      : "")),
+    canPlay ? h("div", { class: "answer-row", style: "margin-top:16px" },
+      h("button", { class: "btn", "data-autofocus": true, onclick: () => openRound(nextR) },
+        started(nextR) ? `Back to round ${nextR + 1}` : "Play again")) : null,
+    h("p", { class: "status-line", style: "margin-top:16px" }, "Tap any square above to review a question and its solution."));
+  getPlayers().then(ps => { const b = leaderboard(ps, state && state.name); if (b) sec.append(b); });
+  return sec;
+}
+
+$("#switch").addEventListener("click", async () => { await api("/api/logout", {}); showLogin(); });
+load();
+</script>
+</body>
+</html>

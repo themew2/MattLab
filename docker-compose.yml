@@ -1,0 +1,16 @@
+services:
+  algebra:
+    build: .
+    container_name: daily-algebra
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: UTC                    # decides when "today" rolls over (midnight UTC = 8pm EDT / 7pm EST)
+      DATA_DIR: /data            # must match the volume mount below
+      POINTS_PER_CORRECT: "10"   # the first skip in each round earns half of this
+      SHARED_QUESTIONS: "0"      # "1" = everyone gets the same set each day
+    volumes:
+      # the project's ./data folder, so the container and a local `gunicorn` run share one database
+      # and secret key. The container runs as uid 1000, which must be able to write to it.
+      - ./data:/data
+    restart: unless-stopped
