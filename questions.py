@@ -460,6 +460,58 @@ def distance(rng):
     return inp("Word problems: distance and rate", text, t, steps, unit="hours", hint="Type a number.")
 
 
+def temperature(rng):
+    # C is a multiple of 5, so both temperatures are whole numbers: F = 9k + 32 when C = 5k
+    frac = rng.random() < 0.5  # state the formula with 9/5, or with its decimal form 1.8
+    if rng.random() < 0.5:
+        text, k = rng.choice([
+            ("A weather app in Paris shows {C}°C. Use F = {f} to find the temperature in degrees Fahrenheit.",
+             rng.randint(-3, 7)),
+            ("A European recipe says to bake bread at {C}°C, but Ana's oven is in Fahrenheit. "
+             "Using F = {f}, what should she set the oven to?", rng.randint(30, 46)),
+            ("A swimming pool is heated to {C}°C. The formula F = {f} converts Celsius to Fahrenheit. "
+             "How warm is the pool in degrees Fahrenheit?", rng.randint(5, 6)),
+            ("A science class measures a freezer at {C}°C. Use F = {f} to convert it to degrees Fahrenheit.",
+             rng.randint(-6, -2)),
+        ])
+        C, F = 5 * k, 9 * k + 32
+        f = "9/5·C + 32" if frac else "1.8C + 32"
+        mult = (f"9/5 · {p(C)} = {9 * k} ({C} ÷ 5 = {k}, then × 9 = {9 * k})." if frac
+                else f"1.8 × {p(C)} = {9 * k}.")
+        steps = [
+            f"The formula is F = {f}. You know C, so substitute C = {C}.",
+            f"F = {f'9/5 · {p(C)}' if frac else f'1.8 × {p(C)}'} + 32.",
+            f"Multiply first: {mult}",
+            f"Then add 32: {9 * k} + 32 = {F}.",
+            f"Check: ({F} - 32) ÷ 1.8 = {9 * k} ÷ 1.8 = {C}. ✓",
+        ]
+        return inp("Word problems: temperature", text.format(C=C, f=f), F, steps, unit="degrees Fahrenheit",
+                   hint="Type a number. Negative numbers are fine.")
+    text, k = rng.choice([
+        ("The forecast in Chicago says {F}°F. Use C = {f} to find the temperature in degrees Celsius.",
+         rng.randint(-4, 7)),
+        ("Leo's thermostat is set to {F}°F. His cousin in Canada asks for it in Celsius. "
+         "Using C = {f}, what is it in degrees Celsius?", rng.randint(3, 5)),
+        ("An American recipe says to roast vegetables at {F}°F. Using C = {f}, "
+         "what temperature is that in degrees Celsius?", rng.randint(36, 46)),
+        ("A patient has a fever of {F}°F. The formula C = {f} converts Fahrenheit to Celsius. "
+         "What is it in degrees Celsius?", 8),
+    ])
+    C, F = 5 * k, 9 * k + 32
+    f = "5/9·(F - 32)" if frac else "(F - 32) ÷ 1.8"
+    div = (f"5/9 · {p(9 * k)} = {C} ({p(9 * k)} ÷ 9 = {k}, then × 5 = {C})." if frac
+           else f"{p(9 * k)} ÷ 1.8 = {C}.")
+    steps = [
+        f"The formula is C = {f}. You know F, so substitute F = {F}.",
+        f"C = {f.replace('F', str(F))}.",
+        f"Parentheses first: {F} - 32 = {9 * k}.",
+        f"Then {div}",
+        f"Check: 1.8 × {p(C)} + 32 = {9 * k} + 32 = {F}. ✓",
+    ]
+    return inp("Word problems: temperature", text.format(F=F, f=f), C, steps, unit="degrees Celsius",
+               hint="Type a number. Negative numbers are fine.")
+
+
 # ---------------------------------------------------------------- fundamentals
 # Always multiple choice. Each wrong choice carries the mistake behind it, and the app shows the
 # explanation as soon as a fundamentals question is answered wrong.
@@ -1347,7 +1399,7 @@ GEOMETRY = [triangle_sides, triangle_angles, angle_types, angle_pairs, quadrilat
 # ---------------------------------------------------------------- daily rounds
 
 FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions]
-WORD_PROBLEMS = [word_rate, consecutive, distance]
+WORD_PROBLEMS = [word_rate, consecutive, distance, temperature]
 GENERATORS = [two_step, both_sides, distribute_solve, inequality, slope, line_equation, evaluate,
               simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]
 ROUND_SIZE, ROUNDS = 5, 2
