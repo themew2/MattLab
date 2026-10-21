@@ -173,12 +173,22 @@ mid-day changes today's questions, so do it right after the daily reset.
 
 Fixes use `manage.py`. Run it from the project folder; the app can keep running.
 
-- **Docker:** `docker compose exec algebra python manage.py <command>`. Add `sudo` in front
-  on Linux.
-- **Plain Python:** `.venv/bin/python manage.py <command>`, or
-  `.venv\Scripts\python manage.py <command>` on Windows.
+`manage.py` needs Flask, like the app itself, so run it with the Python the app uses. Your
+system's own `python` doesn't have Flask and stops with `No module named 'flask'`.
 
-The examples below use the plain form, `python manage.py`.
+- **Docker:** `docker compose exec algebra python manage.py <command>`. Add `sudo` in front
+  on Linux. The container already has Flask.
+- **Plain Python:** `.venv/bin/python manage.py <command>`, or
+  `.venv\Scripts\python manage.py <command>` on Windows. This uses the `.venv` from the
+  install steps. If you run the app with Docker and never made a `.venv`, either use the
+  Docker form or make one first:
+
+      python3 -m venv .venv
+      .venv/bin/pip install -r requirements.txt
+
+  Both forms change the same database in `data/`.
+
+The examples below shorten either form to `python manage.py`.
 
 ### See who's playing and what they answered
 

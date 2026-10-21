@@ -1,6 +1,7 @@
-"""Admin commands for Daily Algebra. Run from the project folder:
+"""Admin commands for Daily Algebra. Run from the project folder, with the Python that has
+Flask installed (the .venv from the install steps; the system python won't work):
 
-    python manage.py players
+    .venv/bin/python manage.py players
     python manage.py today "Name"
     python manage.py reset-round "Name" 2
     python manage.py reset-question "Name" 1 3
