@@ -791,6 +791,130 @@ def fractions(rng):
               [(fnum(v), why) for v, why in distractors] + _near(correct), steps)
 
 
+XY_NAMES = [  # (name for x, name for y, what the pair means)
+    ("x-coordinate", "y-coordinate", "In an ordered pair (x, y), the x-coordinate comes first and the "
+                                     "y-coordinate second."),
+    ("horizontal value", "vertical value", "x moves you left or right (horizontal); y moves you up or down "
+                                           "(vertical)."),
+    ("abscissa", "ordinate", "Abscissa is the formal name for the x-coordinate, and ordinate for the "
+                             "y-coordinate."),
+    ("input", "output", "A function takes an input x and gives back an output y."),
+    ("independent variable", "dependent variable", "y depends on x: you choose x, and y is the result."),
+    ("domain value", "range value", "The domain is the set of all x-values; the range is the set of all "
+                                    "y-values."),
+]
+
+
+def xy_names(rng):
+    return rng.choice([_xy_point, _xy_synonym, _xy_variables, _xy_slope, _xy_domain])(rng)
+
+
+def _xy_point(rng):
+    while True:
+        a, b = nz(rng, -9, 9), nz(rng, -9, 9)
+        if abs(a) != abs(b):
+            break
+    row = rng.choice(XY_NAMES[:4])
+    side = rng.randrange(2)
+    term, correct, other = row[side], (a, b)[side], (a, b)[1 - side]
+    prompt = (f"The point ({a}, {b}) is on the graph of a function. What is the {term}?" if term in ("input", "output")
+              else f"In the point ({a}, {b}), what is the {term}?")
+    distractors = [(str(other), f"{other} is the {row[1 - side]}, the {('second', 'first')[side]} number in the "
+                                f"pair. {row[2]}"),
+                   (str(-correct), f"Keep the sign. The {term} is {correct}, not {-correct}.")]
+    steps = [row[2], f"The pair is ({a}, {b}), so the {term} is {correct}."]
+    return mc(rng, "Names for x and y", prompt, str(correct), distractors + _near(correct), steps)
+
+
+def _xy_synonym(rng):
+    i, j = rng.sample(range(len(XY_NAMES)), 2)
+    side = rng.randrange(2)
+    xy, other_xy = ("x", "y")[side], ("y", "x")[side]
+    given, correct = XY_NAMES[i][side], XY_NAMES[j][side]
+    rest = [k for k in range(len(XY_NAMES)) if k not in (i, j)]
+    picks = [j] + rng.sample(rest, 2)  # the partner of the right answer is the tempting wrong one
+    distractors = [(XY_NAMES[k][1 - side], f"The {XY_NAMES[k][1 - side]} is a name for {other_xy}, not {xy}. "
+                                           f"{XY_NAMES[k][2]}") for k in picks]
+    steps = [f"The {given} is a name for {xy}. {XY_NAMES[i][2]}",
+             f"The {correct} is also a name for {xy}. {XY_NAMES[j][2]}"]
+    return mc(rng, "Names for x and y", f"Which is another name for the same variable as the {given}?",
+              correct, distractors, steps)
+
+
+def _xy_variables(rng):
+    k, f = rng.randint(2, 12), rng.randint(2, 9) * 5
+    templates = [  # (formula, x letter, what it is, y letter, what it is, the numbers that stay fixed)
+        (f"d = {k * 5}t", "t", "hours driven", "d", "miles traveled", [(k * 5, "the speed")]),
+        (f"C = {k}n + {f}", "n", "tickets bought", "C", "total cost", [(k, "the price per ticket"),
+                                                                       (f, "a one-time fee")]),
+        (f"P = {k + 10}h", "h", "hours worked", "P", "pay", [(k + 10, "the hourly wage")]),
+        (f"w = {f} + {k}m", "m", "minutes of filling", "w", "gallons in the tank", [(f, "the starting amount"),
+                                                                                  (k, "the gallons added per minute")]),
+    ]
+    formula, x, x_is, y, y_is, consts = rng.choice(templates)
+    side = rng.randrange(2)
+    row = rng.choice(XY_NAMES[3:5])  # input/output or independent/dependent
+    term = row[side]
+    label = {x: f"{x} ({x_is})", y: f"{y} ({y_is})"}
+    correct, wrong = (x, y)[side], (y, x)[side]
+    distractors = [(label[wrong], f"{y} depends on {x}: the {x_is} decide the {y_is}. So {wrong} is the "
+                                  f"{row[1 - side]}.")]
+    distractors += [(str(c), f"{c} is {why}. It stays the same, so it isn't a variable.") for c, why in consts]
+    steps = [f"Ask what depends on what: the {y_is} depend on the {x_is}.",
+             f"So {x} is the independent variable (the input, like x) and {y} is the dependent variable "
+             f"(the output, like y).",
+             f"The {term} is {label[correct]}."]
+    return mc(rng, "Names for x and y",
+              f"In the formula {formula}, {x} is the {x_is} and {y} is the {y_is}. What is the {term}?",
+              label[correct], distractors, steps)
+
+
+def _xy_slope(rng):
+    run, rise = rng.randint(1, 6), nz(rng, -9, 9)
+    if abs(rise) == run:
+        rise += 1 if rise > 0 else -1
+    m = Fraction(rise, run)
+    down = "down" if rise < 0 else "up"
+    prompt = rng.choice([
+        f"Between two points on a line, the rise is {rise} and the run is {run}. What is the slope?",
+        f"Between two points, a line moves {run} units right (horizontal) and {abs(rise)} units {down} "
+        f"(vertical). What is the slope?",
+    ])
+    distractors = [
+        (fnum(Fraction(run, rise)), "That's run over rise. Slope is rise over run: vertical change ÷ "
+                                    "horizontal change."),
+        (fnum(-m), "Check the sign: going up makes the rise positive, going down makes it negative."),
+        (fnum(rise * run), "Slope divides the rise by the run. It doesn't multiply them."),
+    ]
+    steps = ["Slope is rise over run: the vertical change (y) divided by the horizontal change (x).",
+             f"Rise = {rise}{' (down is negative)' if rise < 0 else ''}, run = {run}.",
+             f"Slope = {rise}/{run}" + ("." if fnum(m) == f"{rise}/{run}" else f" = {fnum(m)}.")]
+    return mc(rng, "Names for x and y", prompt, fnum(m), distractors + _near(m), steps)
+
+
+def _xy_domain(rng):
+    while True:
+        m, b = nz(rng, -3, 3), rng.randint(-5, 5)
+        xs = sorted(rng.sample(range(-4, 7), 3))
+        ys = [m * v + b for v in xs]
+        if set(xs) != set(ys):
+            break
+    fmt = lambda s: "{" + ", ".join(map(str, sorted(set(s)))) + "}"
+    pts = ", ".join(f"({v}, {w})" for v, w in zip(xs, ys))
+    side = rng.randrange(2)
+    ask, other, xy, nth = ("domain", "range")[side], ("range", "domain")[side], ("x", "y")[side], ("first", "second")[side]
+    vals, other_vals = (xs, ys)[side], (ys, xs)[side]
+    distractors = [
+        (fmt(other_vals), f"That's the {other}: the {('y', 'x')[side]}-values."),
+        (fmt(xs + ys), f"The {ask} has only the {xy}-values, not every number in the points."),
+        (fmt([xs[0], ys[0]]), f"That's one point. The {ask} takes the {xy}-value from every point."),
+    ]
+    steps = ["The domain is the set of all x-values (inputs); the range is the set of all y-values (outputs).",
+             f"Take the {nth} number from each point: the {ask} is {fmt(vals)}."]
+    return mc(rng, "Names for x and y", f"A function is made of the points {pts}. What is its {ask}?",
+              fmt(vals), distractors, steps)
+
+
 # ---------------------------------------------------------------- bonus: geometry
 # Identify-the-concept questions with a picture: no calculating. Only used for the bonus question.
 
@@ -1398,7 +1522,7 @@ GEOMETRY = [triangle_sides, triangle_angles, angle_types, angle_pairs, quadrilat
 
 # ---------------------------------------------------------------- daily rounds
 
-FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions]
+FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions, xy_names]
 WORD_PROBLEMS = [word_rate, consecutive, distance, temperature]
 GENERATORS = [two_step, both_sides, distribute_solve, inequality, slope, line_equation, evaluate,
               simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]

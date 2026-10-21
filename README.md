@@ -121,7 +121,9 @@ the port on your router or otherwise put it on the internet.
 - Every round has at least one fundamentals question and one word problem, and topics don't
   repeat within a day:
   - Fundamentals (always multiple choice): order of operations, integer operations,
-    naming the property, like terms, translating words to expressions, fraction operations.
+    naming the property, like terms, translating words to expressions, fraction operations,
+    names for x and y (coordinates, input/output, independent/dependent, domain/range,
+    rise/run).
   - Word problems: rate, consecutive integers, distance, temperature conversion.
   - Core: two-step equations, variables on both sides, distributive property,
     inequalities, slope, slope-intercept form, evaluating expressions, combining like

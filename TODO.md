@@ -18,3 +18,16 @@
       server-drawn picture: triangles (by sides and by angles), angles, angle pairs,
       quadrilaterals, polygons, parts of a circle, lines, and solids. A wrong answer shows
       the explanation right away.
+- [x] Temperature conversion word problems (Celsius to Fahrenheit and back). Each question
+      states the formula, in either the 9/5 or the 1.8 form.
+- [x] "Names for x and y" fundamentals questions, covering the other names for x and y:
+
+      | x                       | y                     | Where you'll see it                              |
+      |-------------------------|-----------------------|--------------------------------------------------|
+      | x-coordinate            | y-coordinate          | Plotting points, ordered pairs (x, y)            |
+      | Horizontal (left/right) | Vertical (up/down)    | Describing direction on the graph                |
+      | Abscissa                | Ordinate              | Formal or older math texts                       |
+      | Input                   | Output                | Functions                                        |
+      | Independent variable    | Dependent variable    | Science and data, where y depends on x           |
+      | Domain values           | Range values          | Sets of all possible x's and y's in a function   |
+      | Run                     | Rise                  | Slope (rise over run)                            |
