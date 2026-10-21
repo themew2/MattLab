@@ -1,10 +1,12 @@
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from fractions import Fraction
 from functools import lru_cache, wraps
 
 from flask import Flask, g, jsonify, request, send_from_directory, session
@@ -18,6 +20,10 @@ RESET_HOUR = int(os.environ.get("RESET_HOUR_UTC", 16))  # new questions every da
 POINTS = int(os.environ.get("POINTS_PER_CORRECT", 10))
 BONUS_POINTS = int(os.environ.get("BONUS_POINTS", 100))  # the geometry bonus after a perfect day
 HALF_SKIP = POINTS // 2  # the first skip in each round earns this; later skips earn 0
+# the Question Blitz: after a day with a miss, retry missed questions until one is missed again
+BLITZ_CHANCE = float(os.environ.get("BLITZ_CHANCE", 0.25))
+BLITZ_MIN = int(os.environ.get("BLITZ_MIN_MISSED", 5))  # missed questions needed to offer it
+BLITZ_BASE = 100  # blitz answers are stored as attempts at idx 100, 101, ...
 # stars roll up like coins: 3 silvers make a gold, 3 golds a platinum, 3 platinums a diamond
 STAR_LEVELS = [("diamond", 2700), ("platinum", 900), ("gold", 300), ("silver", 100)]
 SHARED = os.environ.get("SHARED_QUESTIONS", "0") == "1"
@@ -69,6 +75,14 @@ def _init_db():
         -- and SQLite can hand a deleted id to the next new user
         DELETE FROM attempts WHERE user_id NOT IN (SELECT id FROM users);
     """)
+    # added later: the question as the player saw it (JSON), and whether a blitz cleared a miss.
+    # Attempts from before have no question, so they never join the blitz's missed list.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(attempts)")}
+    if "question" not in cols:
+        con.execute("ALTER TABLE attempts ADD COLUMN question TEXT")
+    if "cleared" not in cols:
+        con.execute("ALTER TABLE attempts ADD COLUMN cleared INTEGER NOT NULL DEFAULT 0")
+    con.commit()
     con.close()
 
 
@@ -199,15 +213,91 @@ def public(i, q, att):
     return d
 
 
-def record(day, idx, q, status, given, pts):
+def dump_question(q):
+    return json.dumps({**q, "answer": Q.fnum(q["answer"])} if "answer" in q else q)
+
+
+def load_question(s):
+    q = json.loads(s)
+    if "answer" in q:
+        q["answer"] = Fraction(q["answer"])
+    return q
+
+
+def record(day, idx, q, status, given, pts, commit=True):
     try:
-        db().execute("INSERT INTO attempts (user_id, day, idx, topic, status, given, points) "
-                     "VALUES (?,?,?,?,?,?,?)",
-                     (g.user["id"], day, idx, q["topic"], status, given, pts))
-        db().commit()
+        db().execute("INSERT INTO attempts (user_id, day, idx, topic, status, given, points, question) "
+                     "VALUES (?,?,?,?,?,?,?,?)",
+                     (g.user["id"], day, idx, q["topic"], status, given, pts, dump_question(q)))
+        if commit:
+            db().commit()
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def grade(q, body):
+    """Returns (correct, given), or (None, error response) for an answer that can't be graded."""
+    if q["kind"] == "mc":
+        choice = body.get("choice")
+        if not isinstance(choice, int) or isinstance(choice, bool) or not 0 <= choice < len(q["choices"]):
+            return None, (jsonify(error="Pick one of the choices."), 400)
+        return choice == q["answer_index"], q["choices"][choice]
+    given = str(body.get("answer") or "").strip()[:64]
+    correct = Q.check_input(q, given)
+    if correct is None:
+        return None, (jsonify(error="Enter a number, like 7, -2.5, or 3/4."), 400)
+    return correct, given
+
+
+# ---------------------------------------------------------------- question blitz
+
+def missed_list(uid):
+    """Missed (wrong or skipped) questions a blitz hasn't cleared yet, oldest first."""
+    return db().execute("""
+        SELECT day, idx, question FROM attempts
+        WHERE user_id=? AND status IN ('wrong','skipped') AND question IS NOT NULL AND cleared=0 AND idx<?
+        ORDER BY day, idx""", (uid, BLITZ_BASE)).fetchall()
+
+
+def _roll(*parts):
+    """A number in [0, 1) that's fixed for these parts, and can't be predicted without the secret."""
+    digest = hmac.new(app.secret_key.encode(), ":".join(map(str, parts)).encode(), hashlib.sha256).hexdigest()
+    return int(digest[:13], 16) / 16 ** 13
+
+
+def blitz(uid, day, atts):
+    """Today's blitz, or None if it isn't offered. Returns (info, current source row or None)."""
+    if any(i not in atts for i in range(Q.BONUS_IDX)):
+        return None, None  # the blitz comes after all the day's questions
+    if all(atts[i]["status"] == "correct" for i in range(Q.BONUS_IDX)):
+        return None, None  # needs a miss today; this also keeps it off bonus days
+    played = [atts[i] for i in sorted(atts) if i >= BLITZ_BASE]
+    pool = missed_list(uid)
+    # decided once: after the first blitz answer the pool shrinks, but the blitz stays
+    if not played and (_roll("blitz", uid, day) >= BLITZ_CHANCE or len(pool) < BLITZ_MIN):
+        return None, None
+    ended_by_miss = bool(played) and played[-1]["status"] != "correct"
+    current = None
+    if not ended_by_miss and pool:
+        current = pool[int(_roll("blitz", uid, day, len(played)) * len(pool))]
+    history = []
+    for a in played:
+        q = load_question(a["question"])
+        d = {"n": a["idx"] - BLITZ_BASE, "topic": q["topic"], "kind": q["kind"], "prompt": q["prompt"],
+             "figure": q.get("figure"), "choices": q.get("choices"), "steps": q["steps"],
+             "status": a["status"], "given": a["given"], "points": a["points"], "correct_answer": q["answer_text"]}
+        if a["status"] == "wrong":
+            d["mistake"] = q.get("mistakes", {}).get(a["given"])
+        history.append(d)
+    info = {"remaining": len(pool), "history": history, "over": current is None,
+            "ended_by": "miss" if ended_by_miss else "cleared" if current is None else None, "current": None}
+    if current:
+        q = load_question(current["question"])
+        # no steps here: they give the answer away, so /api/blitz/explain sends them on request
+        info["current"] = {"n": len(played), "topic": q["topic"], "kind": q["kind"], "prompt": q["prompt"],
+                           "hint": q.get("hint"), "figure": q.get("figure"), "choices": q.get("choices")}
+    return info, current
 
 
 # ---------------------------------------------------------------- routes
@@ -258,7 +348,7 @@ def today_view():
                    bonus_points=BONUS_POINTS,
                    round_size=Q.ROUND_SIZE, rounds=Q.ROUNDS, next_reset=next_reset(),
                    questions=[public(i, q, atts.get(i)) for i, q in enumerate(qs[:unlocked(atts)])],
-                   totals=totals(g.user["id"]))
+                   blitz=blitz(g.user["id"], day, atts)[0], totals=totals(g.user["id"]))
 
 
 @app.post("/api/answer")
@@ -274,19 +364,10 @@ def answer():
     if idx in atts:
         return jsonify(error="You already finished this question."), 409
 
-    if q["kind"] == "mc":
-        choice = body.get("choice")
-        if not isinstance(choice, int) or isinstance(choice, bool) or not 0 <= choice < len(q["choices"]):
-            return jsonify(error="Pick one of the choices."), 400
-        correct = choice == q["answer_index"]
-        given = q["choices"][choice]
-    else:
-        given = str(body.get("answer") or "").strip()[:64]
-        correct = Q.check_input(q, given)
-        if correct is None:
-            return jsonify(error="Enter a number, like 7, -2.5, or 3/4."), 400
-
-    pts = (BONUS_POINTS if idx == Q.BONUS_IDX else POINTS) if correct else 0
+    correct, given = grade(q, body)
+    if correct is None:
+        return given
+    pts =(BONUS_POINTS if idx == Q.BONUS_IDX else POINTS) if correct else 0
     if not record(day, idx, q, "correct" if correct else "wrong", given, pts):
         return jsonify(error="You already finished this question."), 409
     return jsonify(question=public(idx, q, attempt(g.user["id"], day, idx)), totals=totals(g.user["id"]))
@@ -324,6 +405,48 @@ def explain(idx):
     if idx not in atts:
         return jsonify(error="Answer or skip the question to see how it's solved."), 403
     return jsonify(steps=q["steps"], correct_answer=q["answer_text"])
+
+
+@app.get("/api/blitz/explain")
+@require_user
+def blitz_explain():
+    """The current blitz question's steps. Unlike the rounds, these can be opened before answering."""
+    day = request.args.get("day")
+    if (resp := stale_day(day)):
+        return resp
+    info, src = blitz(g.user["id"], day, day_attempts(g.user["id"], day))
+    if src is None or str(info["current"]["n"]) != request.args.get("n"):
+        return jsonify(error="That blitz question was already answered.", stale=True), 409
+    return jsonify(steps=load_question(src["question"])["steps"])
+
+
+@app.post("/api/blitz/answer")
+@require_user
+def blitz_answer():
+    body = request.get_json(silent=True) or {}
+    day, n = body.get("day"), body.get("n")
+    if (resp := stale_day(day)):
+        return resp
+    uid = g.user["id"]
+    info, src = blitz(uid, day, day_attempts(uid, day))
+    if info is None:
+        return jsonify(error="There's no Question Blitz today."), 403
+    if src is None:
+        return jsonify(error="Today's blitz is over.", stale=True), 409
+    if n != info["current"]["n"]:  # answered already, e.g. in another tab; stale makes the page reload
+        return jsonify(error="That blitz question was already answered.", stale=True), 409
+    q = load_question(src["question"])
+    correct, given = grade(q, body)
+    if correct is None:
+        return given
+    q["src"] = [src["day"], src["idx"]]  # the miss it retries, so manage.py can undo a clear
+    if not record(day, BLITZ_BASE + n, q,"correct" if correct else "wrong", given, POINTS if correct else 0,
+                  commit=False):
+        return jsonify(error="That blitz question was already answered.", stale=True), 409
+    if correct:  # a right answer takes it off the missed list
+        db().execute("UPDATE attempts SET cleared=1 WHERE user_id=? AND day=? AND idx=?", (uid, src["day"], src["idx"]))
+    db().commit()
+    return jsonify(blitz=blitz(uid, day, day_attempts(uid, day))[0], totals=totals(uid))
 
 
 if __name__ == "__main__":

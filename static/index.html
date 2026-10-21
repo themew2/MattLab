@@ -169,7 +169,7 @@
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = $("#app");
 let state = null;              // payload from /api/today
-let view = { round: 0, idx: null };  // idx null = the round's results screen
+let view = { round: 0, idx: null };  // idx null = the round's results screen; { blitz: true } = the blitz
 let revealed = {};             // idx -> {steps, shown}; reset in load() so it never leaks across players or days
 
 function h(tag, attrs = {}, ...kids) {
@@ -190,7 +190,8 @@ async function api(path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { showLogin(); throw new Error(data.error); }
-  // the day rolled over since this page loaded; a full reload also picks up any new deploy
+  // the page is out of date (the day rolled over, or a blitz answer came from another tab);
+  // a full reload also picks up any new deploy
   if (data.stale) { location.reload(); throw new Error(data.error); }
   if (!res.ok) throw new Error(data.error || `Server returned ${res.status}.`);
   return data;
@@ -283,7 +284,9 @@ const visibleRounds = () => [...Array(state.rounds).keys()].filter(r => r === 0 
 const resetTime = () => new Date(state.next_reset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function pickView() {
-  // the first open question in a round the player has reached; otherwise the latest results screen
+  // a blitz in progress (or finished); else the first open question in a round the player has
+  // reached; otherwise the latest results screen
+  if (state.blitz && state.blitz.history.length) { view = { blitz: true }; return; }
   for (let r = 0; r < state.rounds && roundQs(r).length; r++) {
     if (r > 0 && !started(r)) { view = { round: r - 1, idx: null }; return; }  // offers "Play again"
     const open = firstOpen(r);
@@ -317,17 +320,28 @@ function renderHeader() {
   $("#who-stars").replaceChildren(starIcons(state.totals.stars));
 }
 
+function renderTabs() {
+  const tabs = visibleRounds().map(i =>
+    [isBonus(i) ? "Bonus" : `Round ${i + 1}`, !view.blitz && i === view.round, () => openRound(i)]);
+  if (state.blitz && (state.blitz.history.length || view.blitz)) tabs.push(["Blitz", !!view.blitz, openBlitz]);
+  return tabs.length > 1 ? h("div", { class: "tabs" }, tabs.map(([name, on, go]) =>
+    h("button", { class: "tab", "aria-pressed": String(on), onclick: go }, name))) : null;
+}
+
 function render() {
   renderHeader();
+  const tabs = renderTabs();
+  if (view.blitz) {
+    app.replaceChildren(...[tabs, ...renderBlitz()].filter(Boolean));
+    const focus = $("[data-autofocus]", app);
+    if (focus) focus.focus();
+    return;
+  }
   const r = view.round;
   const qs = roundQs(r);
   const finished = qs.filter(q => q.status !== "open").length;
   const correct = qs.filter(q => q.status === "correct").length;
 
-  const shown = visibleRounds();
-  const tabs = shown.length > 1 ? h("div", { class: "tabs" }, shown.map(i =>
-    h("button", { class: "tab", "aria-pressed": String(i === r), onclick: () => openRound(i) },
-      isBonus(i) ? "Bonus" : `Round ${i + 1}`))) : null;
   const cells = h("div", { class: "cells", role: "list" }, qs.map((q, i) =>
     h("button", {
       class: `cell ${q.status}${q.idx === view.idx ? " current" : ""}`, role: "listitem",
@@ -394,21 +408,22 @@ function skipButton(q, err) {
     half ? `Skip (+${state.half_skip} pts, once per round)` : "Skip (0 pts)");
 }
 
-function inputControls(q, err) {
+// onSubmit gets {answer} or {choice}; blitz questions pass their own and can't be skipped
+function inputControls(q, err, onSubmit = p => send(q, p, err), canSkip = true) {
   const input = h("input", { inputmode: "text", autocomplete: "off", "aria-label": "Your answer",
                              "aria-describedby": "hint", "data-autofocus": true });
-  const submit = () => send(q, { answer: input.value }, err);
+  const submit = () => onSubmit({ answer: input.value });
   input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
   return h("div", {},
     h("div", { class: "answer-row" }, input,
       h("button", { class: "btn", onclick: submit }, "Check answer"),
-      skipButton(q, err)),
+      canSkip ? skipButton(q, err) : null),
     q.hint ? h("p", { class: "hint", id: "hint" }, q.hint) : null);
 }
 
-function mcControls(q, err) {
+function mcControls(q, err, onSubmit = p => send(q, p, err), canSkip = q.category !== "bonus") {
   let picked = null;
-  const check = h("button", { class: "btn", disabled: true, onclick: () => send(q, { choice: picked }, err) }, "Check answer");
+  const check = h("button", { class: "btn", disabled: true, onclick: () => onSubmit({ choice: picked }) }, "Check answer");
   const buttons = q.choices.map((c, i) => h("button", {
     class: "choice", "aria-pressed": "false", "data-autofocus": i === 0 ? true : null,
     onclick: e => {
@@ -419,7 +434,7 @@ function mcControls(q, err) {
   }, c));
   return h("div", {},
     h("div", { class: "choices", role: "group", "aria-label": "Answer choices" }, buttons),
-    h("div", { class: "answer-row" }, check, q.category === "bonus" ? null : skipButton(q, err)),
+    h("div", { class: "answer-row" }, check, canSkip ? skipButton(q, err) : null),
     q.hint ? h("p", { class: "hint" }, q.hint) : null);
 }
 
@@ -441,27 +456,28 @@ function verdict(q) {
   return h("p", { class: "verdict skipped" }, "Skipped. The answer is ", ans, ".");
 }
 
-function explainBlock(q) {
+// key and url default to a round question; the blitz passes its own
+function explainBlock(q, key = q.idx, url = `/api/explain/${q.idx}?day=${encodeURIComponent(state.day)}`) {
   const box = h("div", { class: "explain" });
-  const r = revealed[q.idx];
+  const r = revealed[key];
   const list = h("ol", { class: "steps" });
   const draw = (fresh) => {
-    const rr = revealed[q.idx];
+    const rr = revealed[key];
     list.replaceChildren(...rr.steps.slice(0, rr.shown).map((s, i) =>
       h("li", { class: fresh && i === rr.shown - 1 ? "new" : "" }, s)));
     actions.replaceChildren(...controls());
   };
   const fetchSteps = async () => {
-    if (!revealed[q.idx]) {
-      const d = await api(`/api/explain/${q.idx}?day=${encodeURIComponent(state.day)}`);
-      revealed[q.idx] = { steps: d.steps, shown: 0 };
+    if (!revealed[key]) {
+      const d = await api(url);
+      revealed[key] = { steps: d.steps, shown: 0 };
     }
-    return revealed[q.idx];
+    return revealed[key];
   };
   const step = async () => { const rr = await fetchSteps(); rr.shown = Math.min(rr.shown + 1, rr.steps.length); draw(true); };
   const all = async () => { const rr = await fetchSteps(); rr.shown = rr.steps.length; draw(false); };
   const controls = () => {
-    const rr = revealed[q.idx];
+    const rr = revealed[key];
     if (rr && rr.shown >= rr.steps.length) return [];
     const started = rr && rr.shown > 0;
     return [
@@ -505,10 +521,20 @@ function renderRoundEnd(r) {
   const total = state.rounds * RS();
   const b = r === state.rounds - 1 ? bonusQ() : null;
   const perfect = state.questions.slice(0, total).every(q => q.status === "correct");
-  const done = !canPlay && !(b && b.status === "open");
+  const bz = r === state.rounds - 1 ? state.blitz : null;
+  const done = !canPlay && !(b && b.status === "open") && !(bz && !bz.over);
   let extra = null;
   if (r === state.rounds - 1) {
-    if (b && b.status === "open")
+    if (bz && !bz.history.length)
+      extra = h("div", { class: "bonus-offer" },
+        h("p", {}, h("b", {}, "Question Blitz! "), `Retry questions you've missed. You can open the explanation ` +
+          `before you answer. Each right answer is worth ${state.points_per_correct} points and takes the question off your ` +
+          `missed list. The blitz keeps going until you miss one. You have ${bz.remaining} missed questions.`),
+        h("button", { class: "btn", "data-autofocus": true, onclick: openBlitz }, "Start the blitz"));
+    else if (bz)
+      extra = h("div", { class: "answer-row", style: "margin-top:16px" },
+        h("button", { class: "btn ghost", onclick: openBlitz }, bz.over ? "See the blitz" : "Back to the blitz"));
+    else if (b && b.status === "open")
       extra = h("div", { class: "bonus-offer" },
         h("p", {}, h("b", {}, "Perfect day! "), `All ${total} correct with no skips. You've unlocked a geometry ` +
           `bonus question worth ${state.bonus_points} points. You get one try, and it can't be skipped.`),
@@ -547,6 +573,78 @@ function renderBonusEnd() {
     h("p", { class: "status-line", style: "margin-top:16px" }, "Tap the square above to review the bonus question."));
   getPlayers().then(ps => { const lb = leaderboard(ps, state && state.name); if (lb) sec.append(lb); });
   return sec;
+}
+
+/* ------------------------------------------------------------ question blitz */
+
+let blitzJust = null;  // the blitz answer just sent, so the next question can say how it went
+
+function openBlitz() {
+  view = { blitz: true };
+  blitzJust = null;
+  render();
+}
+
+async function blitzSend(q, payload, err) {
+  try {
+    const d = await api("/api/blitz/answer", { day: state.day, n: q.n, ...payload });
+    state.blitz = d.blitz;
+    state.totals = d.totals;
+    blitzJust = d.blitz.history[d.blitz.history.length - 1];
+    render();
+  } catch (e) { err.textContent = e.message; }
+}
+
+function renderBlitz() {
+  const bz = state.blitz;
+  const right = bz.history.filter(x => x.status === "correct").length;
+  const pts = bz.history.reduce((sum, x) => sum + x.points, 0);
+  const left = `${bz.remaining} missed question${bz.remaining === 1 ? "" : "s"} left`;
+  const line = h("p", { class: "status-line", style: "margin-top:24px" },
+    `Question Blitz: ${right} right, +${pts} points. ${left}.`);
+  const steps = x => h("div", { class: "explain" },
+    h("p", { class: "status-line" }, "How to do this:"),
+    h("ol", { class: "steps" }, x.steps.map(s => h("li", {}, s))));
+  const figure = x => {
+    if (!x.figure) return null;
+    const fig = h("div", { class: "figure" });
+    fig.innerHTML = x.figure;  // server-drawn SVG built from fixed templates, never from user input
+    return fig;
+  };
+  const prompt = x => h("p", { class: `prompt${x.prompt.length > 90 ? " long" : ""}`, id: "qprompt" }, x.prompt);
+
+  if (!bz.over) {
+    const q = bz.current;
+    const err = h("p", { class: "error", role: "alert" });
+    const submit = p => blitzSend(q, p, err);
+    return [line, h("section", { class: "sheet", "aria-labelledby": "qprompt" },
+      blitzJust && blitzJust.status === "correct"
+        ? h("p", { class: "verdict correct", style: "margin:0 0 14px" }, `Correct. +${blitzJust.points} points. Next one:`)
+        : null,
+      h("div", { class: "meta" }, h("span", {}, q.topic), h("span", {}, `Blitz question ${q.n + 1}`)),
+      prompt(q), figure(q),
+      q.kind === "mc" ? mcControls(q, err, submit, false) : inputControls(q, err, submit, false),
+      err, explainBlock(q, `blitz${q.n}`,
+        `/api/blitz/explain?day=${encodeURIComponent(state.day)}&n=${q.n}`))];
+  }
+
+  const last = bz.history[bz.history.length - 1];
+  const missed = bz.ended_by === "miss";
+  const sec = h("section", { class: "sheet" },
+    h("h2", {}, missed ? "Blitz over" : "You cleared your missed list!"),
+    h("p", { class: "done-score" }, h("span", { class: "score" }, `${pts} points`)),
+    h("p", { class: "status-line" }, `${right} right in a row. ` +
+      (missed ? `The missed questions stay on your list for the next blitz. ` : "") +
+      `New questions at ${resetTime()}.`));
+  if (missed) sec.append(
+    h("div", { class: "explain" },
+      h("div", { class: "meta" }, h("span", {}, `The one that ended it: ${last.topic}`)),
+      prompt(last), figure(last),
+      last.kind === "mc" ? mcReview(last) : null, verdict(last),
+      last.mistake ? h("p", { class: "mistake" }, h("b", {}, `Why not ${last.given}? `), last.mistake) : null,
+      steps(last)));
+  getPlayers().then(ps => { const lb = leaderboard(ps, state && state.name); if (lb) sec.append(lb); });
+  return [line, sec];
 }
 
 $("#switch").addEventListener("click", async () => { await api("/api/logout", {}); showLogin(); });

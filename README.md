@@ -118,6 +118,15 @@ the port on your router or otherwise put it on the internet.
 - A perfect day (all 10 correct, no skips) unlocks a geometry bonus question worth 100
   points. It's identify-the-concept multiple choice with a picture: one try, no skip, and it
   doesn't count toward the 10.
+- A day with at least one miss (wrong or skipped) can instead offer a **Question Blitz**:
+  - **When:** 25% of the time, and only once the player has 5 or more questions on their
+    missed list. The roll is fixed per player per day, so reloading doesn't change it.
+  - **What:** questions from the player's missed list, picked at random. The player can open
+    the step-by-step explanation before answering. No skips.
+  - **Scoring:** 10 points per right answer, and a right answer takes the question off the
+    missed list. The blitz ends at the first miss, or when the list is empty.
+  - **Missed list:** every wrong or skipped answer since questions started being saved with
+    each attempt. Earlier misses don't count, since their questions weren't saved.
 - Every round has at least one fundamentals question and one word problem, and topics don't
   repeat within a day:
   - Fundamentals (always multiple choice): order of operations, integer operations,
@@ -151,6 +160,8 @@ Set these in `docker-compose.yml`, or as environment variables when running with
 | `RESET_HOUR_UTC` | `16` | Hour (UTC) when each day's new questions arrive. |
 | `POINTS_PER_CORRECT` | `10` | Points per correct answer. The first skip in a round earns half. |
 | `BONUS_POINTS` | `100` | Points for a correct bonus question. |
+| `BLITZ_CHANCE` | `0.25` | Chance a day with a miss offers the Question Blitz. `1` always offers it, handy for testing. |
+| `BLITZ_MIN_MISSED` | `5` | Missed questions a player needs before a blitz can be offered. |
 | `SHARED_QUESTIONS` | `0` | `1` gives every player the same questions each day. |
 | `DATA_DIR` | `data/` in the project | Where the database and secret key live. |
 | `SECRET_KEY` | generated into `data/secret_key` | Signs logins and seeds questions. Changing it logs everyone out and changes today's questions. |
@@ -188,8 +199,9 @@ The player gets that round's 5 questions back as unanswered.
 - **Points:** anything earned in that round comes off their totals.
 - **Round 1 after round 2:** resetting round 1 when round 2 is already played locks round 2
   again until round 1 is finished. Round 2's answers are kept.
-- **Bonus:** if the bonus question was answered, it's reset too, because it was only
-  unlocked by a perfect day.
+- **Bonus and blitz:** if the bonus question or a Question Blitz was played that day, it's
+  reset too, because it was only offered because of that day's answers. Questions the blitz
+  took off the missed list go back on it.
 
 ### Reset a player's incorrect question
 
@@ -200,6 +212,7 @@ This reopens round 1, question 3. Use `today` first to find the round and questi
 - Wrong answers scored 0, so no points change.
 - The player has already seen the right answer and the explanation.
 - Handy for testing the bonus, which needs all 10 correct.
+- Any Question Blitz from that day is reset too, as with `reset-round`.
 
 ### Rename a player
 
@@ -235,8 +248,13 @@ Everything lives in the `data/` folder: `algebra.db` (players and scores) and
   add it to `FUNDAMENTALS`, `WORD_PROBLEMS`, `GEOMETRY` (bonus only), or the core part of
   `GENERATORS`. `mc` distractors can be `(choice, mistake)` pairs, to explain a wrong pick.
 - **Question privacy:** questions are regenerated from a seed keyed with the server's secret
-  plus (player, date), so the server grades without storing them. Answers and solutions never
-  reach the browser until the question is answered or skipped.
+  plus (player, date), so the server grades without storing them ahead of time. Answers and
+  solutions never reach the browser until the question is answered or skipped, or, in the
+  blitz, until the player asks for the explanation.
+- **Saved questions:** each attempt also saves the question as the player saw it (JSON in
+  `attempts.question`), since a code change can make an old day regenerate differently. The
+  blitz serves and grades missed questions from that copy. Blitz answers are attempts at
+  `idx` 100 and up; `attempts.cleared` marks a miss a blitz took off the list.
 - **Changes that alter today's questions:** changing a generator, the generator lists,
   `ROUND_SIZE`/`ROUNDS`, the secret key, or the Python version changes questions already
   issued for today. Deploy those changes right after the daily reset.

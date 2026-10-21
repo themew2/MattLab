@@ -13,6 +13,7 @@ With Docker, run the same commands inside the container:
 Changes apply to the current game day unless --day YYYY-MM-DD is given. The app can stay running.
 """
 import argparse
+import json
 import sqlite3
 import sys
 
@@ -38,17 +39,23 @@ def find_player(con, name):
 
 
 def label(idx):
+    if idx >= A.BLITZ_BASE:
+        return f"Blitz question {idx - A.BLITZ_BASE + 1}"
     return "Bonus" if idx == Q.BONUS_IDX else f"Round {idx // N + 1}, question {idx % N + 1}"
 
 
 def delete(con, player, day, idxs, what):
-    """Delete the given attempts. The bonus goes too: it was only unlocked because every earlier
-    answer was correct, so it can't stand once one of them is undone."""
-    idxs = sorted(set(idxs) | {Q.BONUS_IDX})
-    rows = con.execute(f"SELECT idx, status, points FROM attempts WHERE user_id=? AND day=? "
+    """Delete the given attempts. The bonus and the blitz go too: they were only offered because of
+    the day's earlier answers, so they can't stand once one of them is undone. Questions the blitz
+    cleared go back on the missed list."""
+    blitz = [r["idx"] for r in con.execute("SELECT idx FROM attempts WHERE user_id=? AND day=? AND idx>=?",
+                                           (player["id"], day, A.BLITZ_BASE))]
+    idxs = sorted(set(idxs) | {Q.BONUS_IDX} | set(blitz))
+    rows = con.execute(f"SELECT idx, status, points, question FROM attempts WHERE user_id=? AND day=? "
                        f"AND idx IN ({','.join('?' * len(idxs))})", (player["id"], day, *idxs)).fetchall()
     if not rows:
         sys.exit(f"Nothing to reset: {player['name']} hasn't answered {what} on {day}.")
+    restore(con, player, [r for r in rows if r["idx"] >= A.BLITZ_BASE and r["status"] == "correct"])
     con.executemany("DELETE FROM attempts WHERE user_id=? AND day=? AND idx=?",
                     [(player["id"], day, r["idx"]) for r in rows])
     con.commit()
@@ -57,6 +64,14 @@ def delete(con, player, day, idxs, what):
     lost = sum(r["points"] for r in rows)
     print(f"{player['name']}: {len(rows)} answer(s) reset for {day}" + (f", {lost} points removed." if lost else "."))
     print("They get the same questions back. Reload the page to see them.")
+
+
+def restore(con, player, blitz_rows):
+    """Put the misses these right blitz answers cleared back on the missed list."""
+    for r in blitz_rows:
+        src_day, src_idx = json.loads(r["question"])["src"]
+        con.execute("UPDATE attempts SET cleared=0 WHERE user_id=? AND day=? AND idx=?",
+                    (player["id"], src_day, src_idx))
 
 
 def cmd_players(con, args):

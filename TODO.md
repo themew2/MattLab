@@ -31,3 +31,11 @@
       | Independent variable    | Dependent variable    | Science and data, where y depends on x           |
       | Domain values           | Range values          | Sets of all possible x's and y's in a function   |
       | Run                     | Rise                  | Slope (rise over run)                            |
+- [x] Each attempt saves the question as the player saw it (prompt, choices, answer,
+      steps) in `attempts.question`. The blitz uses this copy; the day screens still
+      rebuild questions from the seed.
+- [x] Question Blitz after the 2 rounds. Offered 25% of the time on a day with a miss
+      (wrong or skipped), once the player has 5+ missed questions saved. Retries missed
+      questions, with the explanation available before answering, 10 points each; a right answer takes the question
+      off the missed list. Ends at the first miss or when the list is empty. Misses from
+      before questions were saved don't count. Never on a bonus day.
