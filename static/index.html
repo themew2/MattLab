@@ -374,7 +374,8 @@ function renderQuestion(q) {
   }
 
   if (q.status === "open") {
-    sheet.append(q.kind === "mc" ? mcControls(q, err) : inputControls(q, err), err);
+    sheet.append(q.kind === "mc" ? mcControls(q, err) : inputControls(q, err), err,
+      guideBlock(`guide${q.idx}`, `/api/guide/${q.idx}?day=${encodeURIComponent(state.day)}`));
   } else {
     if (q.kind === "mc") sheet.append(mcReview(q));
     sheet.append(verdict(q));
@@ -493,6 +494,24 @@ function explainBlock(q, key = q.idx, url = `/api/explain/${q.idx}?day=${encodeU
   return box;
 }
 
+// "Explain to me" before answering: how to work it out, with the answer left as "?"
+function guideBlock(key, url) {
+  const box = h("div", { class: "explain" });
+  const show = steps => box.replaceChildren(
+    h("p", { class: "status-line" }, "How to work it out. The last step is yours:"),
+    h("ol", { class: "steps" }, steps.map(s => h("li", {}, s))));
+  if (revealed[key]) { show(revealed[key].steps); return box; }
+  const err = h("p", { class: "error", role: "alert" });
+  box.append(h("button", { class: "btn ghost", onclick: async () => {
+    try {
+      const d = await api(url);
+      revealed[key] = { steps: d.steps };
+      show(d.steps);
+    } catch (e) { err.textContent = e.message; }
+  } }, "Explain to me"), err);
+  return box;
+}
+
 async function send(q, payload, err) {
   try { await applyResult(await api("/api/answer", { day: state.day, idx: q.idx, ...payload })); }
   catch (e) { err.textContent = e.message; }
@@ -527,8 +546,8 @@ function renderRoundEnd(r) {
   if (r === state.rounds - 1) {
     if (bz && !bz.history.length)
       extra = h("div", { class: "bonus-offer" },
-        h("p", {}, h("b", {}, "Question Blitz! "), `Retry questions you've missed. You can open the explanation ` +
-          `before you answer. Each right answer is worth ${state.points_per_correct} points and takes the question off your ` +
+        h("p", {}, h("b", {}, "Question Blitz! "), `Retry questions you've missed. ` +
+          `Each right answer is worth ${state.points_per_correct} points and takes the question off your ` +
           `missed list. The blitz keeps going until you miss one. You have ${bz.remaining} missed questions.`),
         h("button", { class: "btn", "data-autofocus": true, onclick: openBlitz }, "Start the blitz"));
     else if (bz)
@@ -624,8 +643,7 @@ function renderBlitz() {
       h("div", { class: "meta" }, h("span", {}, q.topic), h("span", {}, `Blitz question ${q.n + 1}`)),
       prompt(q), figure(q),
       q.kind === "mc" ? mcControls(q, err, submit, false) : inputControls(q, err, submit, false),
-      err, explainBlock(q, `blitz${q.n}`,
-        `/api/blitz/explain?day=${encodeURIComponent(state.day)}&n=${q.n}`))];
+      err, guideBlock(`blitz${q.n}`, `/api/blitz/explain?day=${encodeURIComponent(state.day)}&n=${q.n}`))];
   }
 
   const last = bz.history[bz.history.length - 1];

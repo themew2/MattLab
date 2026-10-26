@@ -121,8 +121,8 @@ the port on your router or otherwise put it on the internet.
 - A day with at least one miss (wrong or skipped) can instead offer a **Question Blitz**:
   - **When:** 25% of the time, and only once the player has 5 or more questions on their
     missed list. The roll is fixed per player per day, so reloading doesn't change it.
-  - **What:** questions from the player's missed list, picked at random. The player can open
-    the step-by-step explanation before answering. No skips.
+  - **What:** questions from the player's missed list, picked at random, with **Explain to
+    me** like any question. No skips.
   - **Scoring:** 10 points per right answer, and a right answer takes the question off the
     missed list. The blitz ends at the first miss, or when the list is empty.
   - **Missed list:** every wrong or skipped answer since questions started being saved with
@@ -135,12 +135,15 @@ the port on your router or otherwise put it on the internet.
     rise/run).
   - Word problems: rate, consecutive integers, distance, temperature conversion.
   - Core: two-step equations, variables on both sides, distributive property,
-    inequalities, slope, slope-intercept form, evaluating expressions, combining like
+    inequalities, slope, slope-intercept form, evaluating expressions, function notation,
+    combining like
     terms, exponent rules, factoring trinomials, systems.
   - Bonus geometry: triangles, angles, angle pairs, quadrilaterals, polygons, parts of a
     circle, lines, solids.
 - One attempt per question. Correct = 10 points, wrong = 0. The first skip in each round
   earns 5; later skips earn 0. Wrong or skipped questions unlock a step-by-step walkthrough.
+- **Explain to me**, on every question before answering, shows how to work it out with the
+  answer left as "?". It's free: a right answer still earns full points.
   For fundamentals and the bonus, a wrong answer shows the explanation right away, including
   why the picked choice is wrong.
 - Multiple-choice right answers are spread evenly across the four positions each day, so
@@ -257,10 +260,15 @@ Everything lives in the `data/` folder: `algebra.db` (players and scores) and
 - **Add a topic:** write a generator in `questions.py` returning `inp(...)` or `mc(...)` and
   add it to `FUNDAMENTALS`, `WORD_PROBLEMS`, `GEOMETRY` (bonus only), or the core part of
   `GENERATORS`. `mc` distractors can be `(choice, mistake)` pairs, to explain a wrong pick.
+- **Explain to me:** `guide(q)` in `questions.py` builds it from the steps: for a number
+  answer, the steps up to the one where it comes out as a result, with it replaced by "?";
+  for a word answer, the steps before the one that names it. Where the answer is built in
+  pieces (a system's x and y), the generator sets `q["guide"]` itself. After adding a topic,
+  check that its guide doesn't give the answer away.
 - **Question privacy:** questions are regenerated from a seed keyed with the server's secret
   plus (player, date), so the server grades without storing them ahead of time. Answers and
-  solutions never reach the browser until the question is answered or skipped, or, in the
-  blitz, until the player asks for the explanation.
+  solutions never reach the browser until the question is answered or skipped. "Explain to
+  me" sends steps with the answer taken out.
 - **Saved questions:** each attempt also saves the question as the player saw it (JSON in
   `attempts.question`), since a code change can make an old day regenerate differently. The
   blitz serves and grades missed questions from that copy. Blitz answers are attempts at

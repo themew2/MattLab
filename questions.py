@@ -228,9 +228,11 @@ def line_equation(rng):
         f"Solve for b: b = {y1} − {p(m * x1)} = {b}.",
         f"Answer: {correct}.",
     ]
-    return mc(rng, "Writing linear equations",
-              f"Which equation is the line with slope {m} passing through ({x1}, {y1})?",
-              correct, distractors, steps)
+    q = mc(rng, "Writing linear equations",
+           f"Which equation is the line with slope {m} passing through ({x1}, {y1})?",
+           correct, distractors, steps)
+    q["guide"] = steps[:4] + [f"Solve that for b. Then write y = mx + b with m = {m} and your b."]
+    return q
 
 
 # ---------------------------------------------------------------- expressions
@@ -250,6 +252,44 @@ def evaluate(rng):
         f"Add it up: {a * v * v}{tail((b * v, ''))}{tail((c, ''))} = {result}.",
     ]
     return inp("Evaluating expressions", f"Evaluate {expr} when x = {v}.", result, steps)
+
+
+def function_notation(rng):
+    f = rng.choice("fgh")
+    v = nz(rng, -6, 6)
+    kind = rng.choice(["linear", "linear", "quadratic", "reverse"])
+    if kind == "quadratic":
+        a, b, c = nz(rng, -3, 3), rng.randint(-6, 6), rng.randint(-9, 9)
+        rule = poly((a, "x²"), (b, "x"), (c, ""))
+        result = a * v * v + b * v + c
+        steps = [
+            f"{f}({v}) means: put {v} in for x in {f}(x) = {rule}.",
+            f"{f}({v}) = {a}·{p(v)}²" + (f"{' + ' if b > 0 else ' - '}{abs(b)}·{p(v)}" if b else "") + tail((c, "")),
+            f"Exponents first: {p(v)}² = {v * v}.",
+            f"Multiply: {a}·{v * v} = {a * v * v}" + (f", and {b}·{p(v)} = {b * v}." if b else "."),
+            f"Add it up: {a * v * v}{tail((b * v, ''))}{tail((c, ''))} = {result}. So {f}({v}) = {result}.",
+        ]
+        return inp("Function notation", f"Given:\n{f}(x) = {rule}\nFind {f}({v}).", result, steps)
+
+    m, b = nz(rng, -9, 9), rng.randint(-20, 20)
+    rule = poly((m, "x"), (b, ""))
+    k = m * v + b
+    if kind == "reverse":
+        steps = [
+            f"{f}(x) = {k} means the output is {k}. You need the input x.",
+            f"Set the rule equal to {k}: {rule} = {k}.",
+            f"{'Subtract' if b > 0 else 'Add'} {abs(b)} {'from' if b > 0 else 'to'} both sides: {m}x = {k - b}." if b else f"Nothing to move: {m}x = {k}.",
+            f"Divide by {p(m)}: x = {v}.",
+            f"Check: {f}({v}) = {m}·{p(v)}{tail((b, ''))} = {m * v}{tail((b, ''))} = {k}. ✓",
+        ]
+        return inp("Function notation", f"Given:\n{f}(x) = {rule}\nFor what value of x is {f}(x) = {k}?", v, steps)
+    steps = [
+        f"{f}({v}) means: put {v} in for x in {f}(x) = {rule}.",
+        f"{f}({v}) = {m}·{p(v)}{tail((b, ''))}",
+        f"Multiply: {m}·{p(v)} = {m * v}.",
+        f"Then {m * v}{tail((b, ''))} = {k}. So {f}({v}) = {k}.",
+    ]
+    return inp("Function notation", f"Given:\n{f}(x) = {rule}\nFind {f}({v}).", k, steps)
 
 
 def simplify(rng):
@@ -277,7 +317,9 @@ def simplify(rng):
         f"Combine the constants: {a * c} + {p(e)} = {a * c + e}.",
         f"Result: {correct}.",
     ]
-    return mc(rng, "Combining like terms", prompt, correct, distractors, steps)
+    q = mc(rng, "Combining like terms", prompt, correct, distractors, steps)
+    q["guide"] = steps[:3] + ["Now combine the x-terms, then combine the plain numbers. Watch the signs."]
+    return q
 
 
 def exponents(rng):
@@ -296,6 +338,7 @@ def exponents(rng):
             f"(x{sup(a)} is {a} x's multiplied, x{sup(b)} is {b} more — {a + b} total.)",
             f"Result: {correct}.",
         ]
+        guide = [steps[0], f"Coefficients: multiply {m}·{n}.", f"Exponents: add {a} + {b}."]
     elif variant == "power":
         a, b = rng.randint(2, 5), rng.randint(2, 4)
         prompt = f"Simplify:\n(x{sup(a)}){sup(b)}"
@@ -307,6 +350,7 @@ def exponents(rng):
             f"That's {' + '.join([str(a)] * b)} = {a * b} x's in total.",
             f"Result: {correct}.",
         ]
+        guide = steps[:2] + [f"Count the x's: {b} groups of {a}."]
     else:
         n = rng.randint(2, 6)
         m = n * rng.randint(2, 6)
@@ -323,7 +367,10 @@ def exponents(rng):
             f"({b} of the x's on top cancel with the {b} on the bottom.)",
             f"Result: {correct}.",
         ]
-    return mc(rng, "Exponent rules", prompt, correct, distractors, steps)
+        guide = [steps[0], f"Coefficients: divide {m} ÷ {n}.", f"Exponents: subtract {a} − {b}."]
+    q = mc(rng, "Exponent rules", prompt, correct, distractors, steps)
+    q["guide"] = guide
+    return q
 
 
 def factoring(rng):
@@ -350,8 +397,11 @@ def factoring(rng):
         f"Check with FOIL: x·x = x², outer + inner = {poly((pp, 'x'))}{tail((qq, 'x'))} = {poly((b, 'x'))}, "
         f"last = {pp}·{p(qq)} = {c}. ✓",
     ]
-    return mc(rng, "Factoring quadratics", f"Factor:\n{poly((1, 'x²'), (b, 'x'), (c, ''))}",
-              correct, distractors, steps)
+    q = mc(rng, "Factoring quadratics", f"Factor:\n{poly((1, 'x²'), (b, 'x'), (c, ''))}",
+           correct, distractors, steps)
+    q["guide"] = [steps[0], f"List the pairs of numbers that multiply to {c}, and add up each pair.",
+                  f"The pair that adds to {b} gives the factors: (x + first number)(x + second number)."]
+    return q
 
 
 def system(rng):
@@ -385,7 +435,10 @@ def system(rng):
         f"Solution: {correct}. Check both: {x}{tail((k * y, ''))} = {s} ✓ and "
         f"{a * x}{tail((b * y, ''))} = {c} ✓",
     ]
-    return mc(rng, "Systems of equations", f"Solve the system:\n{eq1}\n{eq2}", correct, distractors, steps)
+    q = mc(rng, "Systems of equations", f"Solve the system:\n{eq1}\n{eq2}", correct, distractors, steps)
+    q["guide"] = steps[:4] + [f"Get y by itself to find y. Then plug y into x = {xexpr} to find x. "
+                              "The answer is the point (x, y)."]
+    return q
 
 
 # ---------------------------------------------------------------- word problems
@@ -864,9 +917,13 @@ def _xy_variables(rng):
              f"So {x} is the independent variable (the input, like x) and {y} is the dependent variable "
              f"(the output, like y).",
              f"The {term} is {label[correct]}."]
-    return mc(rng, "Names for x and y",
-              f"In the formula {formula}, {x} is the {x_is} and {y} is the {y_is}. What is the {term}?",
-              label[correct], distractors, steps)
+    q = mc(rng, "Names for x and y",
+           f"In the formula {formula}, {x} is the {x_is} and {y} is the {y_is}. What is the {term}?",
+           label[correct], distractors, steps)
+    q["guide"] = [steps[0].replace(f"the {y_is} depend on the {x_is}.", "which quantity depends on the other?"),
+                  "The independent variable (the input, like x) is the one you choose. The dependent variable "
+                  "(the output, like y) is the result that depends on it. Numbers that stay the same aren't variables."]
+    return q
 
 
 def _xy_slope(rng):
@@ -1525,7 +1582,7 @@ GEOMETRY = [triangle_sides, triangle_angles, angle_types, angle_pairs, quadrilat
 FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions, xy_names]
 WORD_PROBLEMS = [word_rate, consecutive, distance, temperature]
 GENERATORS = [two_step, both_sides, distribute_solve, inequality, slope, line_equation, evaluate,
-              simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]
+              function_notation, simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]
 ROUND_SIZE, ROUNDS = 5, 2
 BONUS_IDX = ROUND_SIZE * ROUNDS  # the geometry bonus comes after the last round
 
@@ -1573,6 +1630,52 @@ def _balance_answers(qs, rng):
         slot = min(slot, len(others))
         q["choices"] = others[:slot] + [q["answer_text"]] + others[slot:]
         q["answer_index"] = slot
+
+
+# ---------------------------------------------------------------- explain before answering
+
+_NUM_IN = re.compile(r"-?\d+(?:\.\d+)?(?:/\d+)?")
+
+
+def _token(s):
+    """Matches s on its own: '3' doesn't match inside '-3', '13', '3x', '3/4', or '3 / 4'."""
+    return re.compile(r"(?<![\w.\-/])" + re.escape(s) + r"(?![\w/]|\.\d|\s*/)", re.I)
+
+
+def _result(s):
+    """Matches s where a step gives it as a result: '= 5', ': 5', 'is 5', 'giving 5', but not
+    as the start of more math ('Equation: 5 + 2w', 'Distribute: 5·x')."""
+    return re.compile(r"(?:=|:|\bis\b|\bgiving\b)\s*(" + re.escape(s) + r")(?![\w/·]|\.\d|\s*[/+\-−×÷])", re.I)
+
+
+def guide(q):
+    """How to work the question out, without the answer, for "Explain to me" before answering.
+    A number answer: the steps up to the one where it comes out as a result ("= 5", not the 5 in
+    "÷ 5"), with each result spot in that step replaced by '?'.
+    A word answer (naming a shape or a rule): the steps before the one that names it.
+    Generators whose answer is built up in pieces (a system's x and y) set q["guide"] instead."""
+    if "guide" in q:
+        return q["guide"]
+    ans = fnum(q["answer"]) if q["kind"] == "input" else q["answer_text"]
+    steps = q["steps"]
+    if not _NUM_IN.fullmatch(ans):
+        pat = _token(ans)
+        for i, step in enumerate(steps):
+            if pat.search(step):
+                return steps[:i] or [pat.sub("?", steps[0])]
+        return steps
+    # the last step that gives it as a result, ignoring checks after it. An earlier step can show
+    # the same number by chance ("-x + 10 = 5" when x = 5), which gives nothing away.
+    pat = _result(ans)
+    work = [s for s in steps if "✓" not in s and not s.startswith(("Check", "Sanity", "Shortcut", "Meaning"))]
+    for i in reversed(range(len(work))):
+        hits = list(pat.finditer(work[i]))
+        if hits:
+            step = work[i]
+            for m in reversed(hits):
+                step = step[:m.start(1)] + "?" + step[m.end(1):]
+            return work[:i] + [step]
+    return work
 
 
 # ---------------------------------------------------------------- grading

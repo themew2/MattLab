@@ -294,7 +294,7 @@ def blitz(uid, day, atts):
             "ended_by": "miss" if ended_by_miss else "cleared" if current is None else None, "current": None}
     if current:
         q = load_question(current["question"])
-        # no steps here: they give the answer away, so /api/blitz/explain sends them on request
+        # no steps here: they give the answer away. /api/blitz/explain sends a version without it
         info["current"] = {"n": len(played), "topic": q["topic"], "kind": q["kind"], "prompt": q["prompt"],
                            "hint": q.get("hint"), "figure": q.get("figure"), "choices": q.get("choices")}
     return info, current
@@ -407,17 +407,30 @@ def explain(idx):
     return jsonify(steps=q["steps"], correct_answer=q["answer_text"])
 
 
+@app.get("/api/guide/<int:idx>")
+@require_user
+def guide(idx):
+    """"Explain to me": how to work it out, without the answer, so it's fine before answering."""
+    day = request.args.get("day")
+    if (resp := stale_day(day)):
+        return resp
+    q, atts = get_question(idx, day)
+    if q is None:
+        return atts
+    return jsonify(steps=Q.guide(q))
+
+
 @app.get("/api/blitz/explain")
 @require_user
 def blitz_explain():
-    """The current blitz question's steps. Unlike the rounds, these can be opened before answering."""
+    """"Explain to me" for the current blitz question: how to work it out, without the answer."""
     day = request.args.get("day")
     if (resp := stale_day(day)):
         return resp
     info, src = blitz(g.user["id"], day, day_attempts(g.user["id"], day))
     if src is None or str(info["current"]["n"]) != request.args.get("n"):
         return jsonify(error="That blitz question was already answered.", stale=True), 409
-    return jsonify(steps=load_question(src["question"])["steps"])
+    return jsonify(steps=Q.guide(load_question(src["question"])))
 
 
 @app.post("/api/blitz/answer")
