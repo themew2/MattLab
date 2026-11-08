@@ -972,6 +972,417 @@ def _xy_domain(rng):
               fmt(vals), distractors, steps)
 
 
+# ---------------------------------------------------------------- lines on the coordinate plane
+
+PLANE_N, PLANE_PX, PLANE_PAD = 6, 16, 18  # the grid runs from -6 to 6; pixels per unit; margin for labels
+
+
+def _clip(p, q, lim):
+    """The part of the line through p and q inside the square from -lim to lim."""
+    (x1, y1), (x2, y2) = p, q
+    dx, dy = x2 - x1, y2 - y1
+    lo, hi = -math.inf, math.inf
+    for o, d in ((x1, dx), (y1, dy)):
+        if d:
+            t1, t2 = (-lim - o) / d, (lim - o) / d
+            lo, hi = max(lo, min(t1, t2)), min(hi, max(t1, t2))
+    return (x1 + lo * dx, y1 + lo * dy), (x1 + hi * dx, y1 + hi * dy)
+
+
+def _plane(*items):
+    """A coordinate grid with things drawn on it, in graph coordinates (y points up). Items are
+    ("line", p, q): the whole line through p and q, with arrows where it leaves the grid, or
+    ("seg", p, q): a segment with solid dots at both ends."""
+    n, k, pad = PLANE_N, PLANE_PX, PLANE_PAD
+    size = 2 * n * k + 2 * pad
+
+    def px(pt):
+        return pad + (pt[0] + n) * k, pad + (n - pt[1]) * k
+
+    out = []
+    for i in range(-n, n + 1):
+        if i:
+            out += [Fig._seg([px((i, -n)), px((i, n))], k, "g"), Fig._seg([px((-n, i)), px((n, i))], k, "g")]
+    out += [Fig._seg([px((-n, 0)), px((n, 0))], k, "ax"), Fig._seg([px((0, -n)), px((0, n))], k, "ax")]
+    for i in range(-n, n + 1, 2):
+        if i:
+            (x, y), (x2, y2) = px((i, 0)), px((0, i))
+            out += [f'<text class="tk" x="{x:.1f}" y="{y + 11:.1f}" text-anchor="middle">{i}</text>',
+                    f'<text class="tk" x="{x2 - 5:.1f}" y="{y2:.1f}" text-anchor="end" '
+                    f'dominant-baseline="central">{i}</text>']
+    (x, y), (x2, y2) = px((n, 0)), px((0, n))
+    out += [f'<text class="lbl" x="{x + 9:.1f}" y="{y:.1f}" dominant-baseline="central">x</text>',
+            f'<text class="lbl" x="{x2:.1f}" y="{y2 - 9:.1f}" text-anchor="middle">y</text>']
+    for kind, a, b in items:
+        if kind == "line":
+            s, e = _clip(a, b, n - 0.3)
+            out.append(Fig()._line([px(s), px(e)], k))
+        else:
+            out += [Fig._seg([px(a), px(b)], k), Fig._dot([px(a)], k), Fig._dot([px(b)], k)]
+    return (f'<svg class="geo plane" viewBox="0 0 {size} {size}" role="img" '
+            f'aria-label="Graph on a coordinate grid">{"".join(out)}</svg>')
+
+
+def _slanted(rng, sign):
+    """Two points on a slanted line that goes up (sign 1) or down (sign -1) from left to right."""
+    run, rise = rng.choice([(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (2, 3), (3, 2)])
+    a = (rng.randint(-2, 2), rng.randint(-2, 2))
+    return a, (a[0] + run, a[1] + sign * rise)
+
+
+SLOPE_SIGNS = {
+    "Positive": "A positive slope goes up from left to right, like walking uphill.",
+    "Negative": "A negative slope goes down from left to right, like walking downhill.",
+    "Zero": "A zero slope is flat: a horizontal line.",
+    "Undefined": "A vertical line's slope is undefined: the run is 0, and you can't divide by 0.",
+}
+SLOPE_GUIDE = ["Read the line from left to right, the way you read a sentence.",
+               "Uphill is positive, downhill is negative, flat is zero, and straight up and down is undefined."]
+
+
+def slope_sign(rng):
+    return rng.choice([_sign_graph, _sign_graph, _sign_equation, _sign_points, _sign_story])(rng)
+
+
+def _sign_q(rng, prompt, kind, steps, why=None, fig=None):
+    """Multiple choice between the four kinds of slope. why(choice) can explain a tempting wrong pick."""
+    def mistake(o):
+        return (why and why(o)) or f"{SLOPE_SIGNS[o]} That doesn't match this line."
+    q = mc(rng, "Positive and negative slope", prompt, kind,
+           [(o, mistake(o)) for o in SLOPE_SIGNS if o != kind], steps)
+    q["guide"] = SLOPE_GUIDE
+    if fig:
+        q["figure"] = fig
+    return q
+
+
+def _sign_graph(rng):
+    kind = rng.choices(list(SLOPE_SIGNS), [4, 4, 1, 1])[0]
+    c = nz(rng, -4, 4)
+    if kind == "Zero":
+        a, b = (0, c), (1, c)
+        seen = "The line is flat: going left to right, it doesn't go up or down."
+    elif kind == "Undefined":
+        a, b = (c, 0), (c, 1)
+        seen = "The line goes straight up and down, so it has no left-to-right direction at all."
+    else:
+        a, b = _slanted(rng, 1 if kind == "Positive" else -1)
+        seen = f"Going left to right, the line goes {'up' if kind == 'Positive' else 'down'}."
+    opposite = {"Positive": "Negative", "Negative": "Positive"}.get(kind)
+
+    def why(o):
+        if o == opposite:
+            return (f"Read it from left to right, like a sentence. Going right, this line goes "
+                    f"{'up' if kind == 'Positive' else 'down'}.")
+
+    steps = [SLOPE_GUIDE[0], seen, f"So the slope is {kind.lower()}. {SLOPE_SIGNS[kind]}"]
+    return _sign_q(rng, "Is the slope of this line positive, negative, zero, or undefined?", kind, steps, why,
+                   _plane(("line", a, b)))
+
+
+def _sign_equation(rng):
+    m = nz(rng, -6, 6)
+    # usually give b the other sign, so reading the wrong number gives the wrong answer
+    b = nz(rng, 1, 9) * (-1 if m > 0 else 1) * (1 if rng.random() < 0.7 else -1)
+    expr = poly((m, "x"), (b, "")) if rng.random() < 0.6 else poly((b, ""), (m, "x"))
+    kind, b_kind = ("Positive" if m > 0 else "Negative"), ("Positive" if b > 0 else "Negative")
+
+    def why(o):
+        if o == b_kind != kind:
+            return f"{b} is where the line crosses the y-axis, not the slope. The slope is {m}, the number multiplying x."
+        if o in ("Zero", "Undefined"):
+            return f"{SLOPE_SIGNS[o]} y = {expr} has an x-term with a number in front, so the line tilts."
+
+    steps = ["In y = mx + b, the slope m is the number multiplying x. The number on its own (b) is where the "
+             "line crosses the y-axis, and it doesn't change which way the line tilts.",
+             f"In y = {expr}, the number multiplying x is {m}.",
+             f"{m} is {kind.lower()}, so the slope is {kind.lower()}: the line goes {'up' if m > 0 else 'down'} "
+             f"from left to right."]
+    q = _sign_q(rng, f"Is the slope of the line y = {expr} positive or negative?", kind, steps, why)
+    q["guide"] = [steps[0], "Find the number multiplying x, and check its sign."]
+    return q
+
+
+def _sign_points(rng):
+    x1, x2 = rng.sample(range(-7, 8), 2)
+    y1, y2 = rng.sample(range(-9, 10), 2)
+    m = Fraction(y2 - y1, x2 - x1)
+    kind = "Positive" if m > 0 else "Negative"
+    (lx, ly), (rx, ry) = sorted([(x1, y1), (x2, y2)])
+    went = "up" if ry > ly else "down"
+
+    def why(o):
+        if o == "Zero":
+            return "The y-values are different, so the line isn't flat."
+        if o == "Undefined":
+            return "The x-values are different, so the line isn't vertical."
+        if x1 > x2:  # listed right to left
+            return f"Read from left to right: start at x = {lx}, the smaller x. From there, y goes {went}."
+        return f"From x = {lx} to x = {rx}, y goes from {ly} to {ry}, so the line goes {went}."
+
+    steps = ["Put the points in order from left to right (smaller x first), then see whether y goes up or down.",
+             f"From x = {lx} to x = {rx}, y goes from {ly} to {ry}: {went}.",
+             f"So the slope is {kind.lower()}. Check: ({y2} − {p(y1)}) / ({x2} − {p(x1)}) = {fnum(m)}."]
+    q = _sign_q(rng, f"A line goes through ({x1}, {y1}) and ({x2}, {y2}). Is its slope positive or negative?",
+                kind, steps, why)
+    q["guide"] = steps[:1]
+    return q
+
+
+def _sign_story(rng):
+    a, r, g = rng.randint(10, 40), rng.randint(2, 6), rng.randint(1, 4)
+    text, y, x, kind = rng.choice([  # (story, what y measures, what x measures, slope)
+        (f"A candle is {a} cm tall and burns down {g} cm every hour.", "its height", "hours", "Negative"),
+        (f"You have ${a} saved and add ${r} every week.", "your savings", "weeks", "Positive"),
+        (f"A car starts with {a} gallons of gas and uses {g} gallons every hour.", "the gas in the tank", "hours",
+         "Negative"),
+        (f"A plant is {r} cm tall and grows {g} cm every week.", "its height", "weeks", "Positive"),
+        (f"A pool holds {a * 100} gallons and drains {r * 10} gallons every minute.", "the water in the pool",
+         "minutes", "Negative"),
+        (f"A taxi charges ${r} plus $2 for every mile.", "the fare", "miles", "Positive"),
+        (f"A streaming plan costs ${r + 8} a month, no matter how many hours you watch.", "the monthly cost",
+         "hours watched", "Zero"),
+    ])
+    change = {"Positive": "goes up", "Negative": "goes down", "Zero": "stays the same"}[kind]
+
+    def why(o):
+        if o == "Undefined":
+            return f"{SLOPE_SIGNS[o]} That would mean many different values of {y} at one single moment."
+        return f"As the {x} go up, {y} {change}, so the graph {change} from left to right."
+
+    steps = [f"Ask: as the {x} go up, what happens to {y}?", f"As the {x} go up, {y} {change}.",
+             f"So the slope is {kind.lower()}. {SLOPE_SIGNS[kind]}"]
+    q = _sign_q(rng, f"{text} On a graph of {y} (y) against {x} (x), is the slope positive, negative, or zero?",
+                kind, steps, why)
+    q["guide"] = [steps[0], "Going up means a positive slope, going down means negative, and staying the same "
+                            "means zero."]
+    return q
+
+
+HV_RULE = ("A horizontal (flat) line keeps the same y-value everywhere, so its equation is y = a number. "
+           "A vertical (straight up and down) line keeps the same x-value, so its equation is x = a number.")
+
+
+def horizontal_vertical(rng):
+    return rng.choice([_hv_graph, _hv_graph, _hv_describe, _hv_points, _hv_slope, _hv_on_line])(rng)
+
+
+def _hv(rng, prompt, correct, distractors, steps, guide, fig=None):
+    q = mc(rng, "Horizontal and vertical lines", prompt, correct, distractors, steps)
+    q["guide"] = guide
+    if fig:
+        q["figure"] = fig
+    return q
+
+
+def _hv_axes(vertical):
+    """(the letter that stays fixed, the letter that's free, which way the line goes)"""
+    return ("x", "y", "vertical") if vertical else ("y", "x", "horizontal")
+
+
+def _hv_graph(rng):
+    vertical, c = rng.random() < 0.5, nz(rng, -5, 5)
+    fixed, free, way = _hv_axes(vertical)
+    other = _hv_axes(not vertical)[2]
+    a, b = ((c, 0), (c, 1)) if vertical else ((0, c), (1, c))
+    correct = f"{fixed} = {c}"
+    distractors = [
+        (f"{free} = {c}", f"{free} = {c} is a {other} line. This line is {way}."),
+        (f"{fixed} = {-c}", f"Check the sign. The line crosses the {free}-axis at {c}, not {-c}."),
+        (f"y = {poly((c, 'x'))}", f"y = {poly((c, 'x'))} is a slanted line through the origin. This line is {way}."),
+    ]
+    seen = (f"The line goes straight up and down (vertical) and crosses the x-axis at {c}." if vertical else
+            f"The line is flat (horizontal) and crosses the y-axis at {c}.")
+    steps = [HV_RULE, f"{seen} Every point on it has {fixed} = {c}.", f"So the equation is {correct}."]
+    return _hv(rng, "What is the equation of the line in the graph?", correct, distractors, steps,
+               [HV_RULE, "Is the line flat or straight up and down? Then find where it crosses an axis."],
+               _plane(("line", a, b)))
+
+
+def _hv_describe(rng):
+    vertical, c = rng.random() < 0.5, nz(rng, -5, 5)
+    fixed, free, way = _hv_axes(vertical)
+    eq = f"{fixed} = {c}"
+    vert, horiz = f"A vertical line through ({c}, 0)", f"A horizontal line through (0, {c})"
+    correct, swap = (vert, horiz) if vertical else (horiz, vert)
+    examples = f"({c}, 0), ({c}, 1), ({c}, -2)" if vertical else f"(0, {c}), (1, {c}), (-2, {c})"
+    lie = "straight up and down" if vertical else "flat, left to right"
+    distractors = [
+        (swap, f"{eq} fixes {fixed}, not {free}. Every point has {fixed} = {c}, so the points line up {lie}."),
+        (f"Just the point ({c}, 0)" if vertical else f"Just the point (0, {c})",
+         f"{eq} doesn't pick one point. {free} can be any number, so it's a whole line of points, like {examples}."),
+        (f"A slanted line through the origin with slope {c}",
+         f"A slanted line needs x and y together, like y = {poly((c, 'x'))}. {eq} has only {fixed}, so it "
+         f"isn't slanted."),
+    ]
+    steps = [HV_RULE, f"In {eq}, {fixed} is always {c} and {free} can be anything: points like {examples}.",
+             f"Those points line up {lie}, so the graph is {correct[0].lower()}{correct[1:]}."]
+    return _hv(rng, f"Which describes the graph of {eq}?", correct, distractors, steps,
+               [HV_RULE, f"In {eq}, which letter is fixed, and which can be any number?"])
+
+
+def _hv_points(rng):
+    vertical, c = rng.random() < 0.5, nz(rng, -6, 6)
+    fixed, free, way = _hv_axes(vertical)
+    a, b = rng.sample([v for v in range(-8, 9) if v != c], 2)
+    pts = [(c, a), (c, b)] if vertical else [(a, c), (b, c)]
+    correct = f"{fixed} = {c}"
+    distractors = [
+        (f"{free} = {c}", f"{c} is the {fixed}-value both points share, so the equation is {fixed} = {c}."),
+        (f"{free} = {a}", f"The {free}-values change ({a} and {b}), so {free} isn't fixed."),
+        (f"{fixed} = {a}", f"{a} is a {free}-value. The value both points share is {fixed} = {c}."),
+    ]
+    steps = [HV_RULE, f"Both points have {fixed} = {c}; only the {free}-values change ({a} and {b}).",
+             f"Every point on the line has {fixed} = {c}, so the line is {way}: {correct}."]
+    return _hv(rng, f"A line goes through {pts[0]} and {pts[1]}. What is its equation?", correct, distractors,
+               steps, [HV_RULE, "Compare the two points. Which coordinate is the same in both?"])
+
+
+def _hv_slope(rng):
+    vertical, c = rng.random() < 0.5, nz(rng, -6, 6, (0, 1))
+    fixed, free, way = _hv_axes(vertical)
+    eq = f"{fixed} = {c}"
+    if vertical:
+        correct = "Undefined"
+        distractors = [("0", f"0 is the slope of a flat line. {eq} is vertical: the run is 0, and you can't "
+                             f"divide by 0."),
+                       ("1", f"A slope of 1 is a slanted line. {eq} doesn't slant; it goes straight up and down.")]
+        steps = ["Slope is rise over run.",
+                 f"{eq} is a vertical line. Take two points on it, like ({c}, 0) and ({c}, 1): the rise is 1 but "
+                 f"the run is {c} − {p(c)} = 0.",
+                 "You can't divide by 0, so the slope is undefined."]
+    else:
+        correct = "0"
+        distractors = [("Undefined", f"Undefined is the slope of a vertical line. {eq} is flat: it rises 0 for "
+                                     f"any run, and 0 divided by a number is 0."),
+                       ("1", f"A slope of 1 rises one unit for every unit across. {eq} doesn't rise at all.")]
+        steps = ["Slope is rise over run.",
+                 f"{eq} is a horizontal line. Take two points on it, like (0, {c}) and (1, {c}): the rise is "
+                 f"{c} − {p(c)} = 0 and the run is 1.",
+                 "0 ÷ 1 = 0, so the slope is 0."]
+    distractors.append((str(c), f"{c} tells you where the line crosses the {free}-axis, not how steep it is."))
+    return _hv(rng, f"What is the slope of the line {eq}?", correct, distractors, steps,
+               ["Slope is rise over run.", f"Is {eq} horizontal or vertical? Take two points on it and find the "
+                                           f"rise and the run."])
+
+
+def _hv_on_line(rng):
+    vertical, c = rng.random() < 0.5, nz(rng, -6, 6)
+    fixed, free, way = _hv_axes(vertical)
+    k = nz(rng, -6, 6, (0, c, -c))
+    eq = f"{fixed} = {c}"
+    pt = (lambda f, o: f"({f}, {o})") if vertical else (lambda f, o: f"({o}, {f})")  # (fixed value, other)
+    correct = pt(c, k)
+    distractors = [
+        (pt(k, c), f"In {pt(k, c)} the {fixed}-value is {k}, not {c}. A point is written (x, y): x first, then y."),
+        (pt(-c, k), f"Check the sign: the {fixed}-value has to be {c}, not {-c}."),
+        (pt(k, k), f"The {fixed}-value of {pt(k, k)} is {k}, not {c}."),
+    ]
+    steps = [f"Every point on {eq} has {fixed} = {c}; the {free}-value can be anything.",
+             "In a point (x, y), x comes first and y comes second.",
+             f"{correct} has {fixed} = {c}, so it's on the line."]
+    return _hv(rng, f"Which point is on the line {eq}?", correct, distractors, steps, steps[:2])
+
+
+DR_RULE = ("The domain is every x-value the graph covers (left to right). The range is every y-value it covers "
+           "(bottom to top).")
+
+
+def domain_range(rng):
+    return rng.choice([_dr_segment, _dr_segment, _dr_repeats, _dr_line])(rng)
+
+
+def _dr_segment(rng):
+    while True:
+        x1, x2 = sorted(rng.sample(range(-5, 6), 2))
+        y1, y2 = rng.sample(range(-5, 6), 2)
+        if x2 - x1 >= 3 and abs(y2 - y1) >= 2:
+            break
+    ylo, yhi = sorted((y1, y2))
+    domain = rng.random() < 0.5
+    ask, xy, lo, hi, way = ("domain", "x", x1, x2, "left to right") if domain else ("range", "y", ylo, yhi,
+                                                                                    "bottom to top")
+    other, oxy, olo, ohi, oway = ("range", "y", ylo, yhi, "bottom to top") if domain else ("domain", "x", x1, x2,
+                                                                                           "left to right")
+    correct = f"{lo} ≤ {xy} ≤ {hi}"
+    distractors = [
+        (f"{olo} ≤ {oxy} ≤ {ohi}", f"That's the {other}: the {oxy}-values, read {oway}."),
+        (f"Only {xy} = {lo} and {xy} = {hi}", f"The segment covers every {xy}-value between its endpoints, not "
+                                              f"just the two ends."),
+        ("All real numbers", "The graph stops at the dots. Only a line with arrows keeps going forever."),
+    ]
+    steps = [DR_RULE,
+             f"The segment runs from ({x1}, {y1}) to ({x2}, {y2}). The solid dots mean both endpoints count.",
+             f"Left to right it covers x from {x1} to {x2}; bottom to top it covers y from {ylo} to {yhi}.",
+             f"So the {ask} is {correct}."]
+    return _dr(rng, f"What is the {ask} of the graph?", correct, distractors, steps,
+               [DR_RULE, f"Find where the segment starts and stops, reading {way}. The solid dots count."],
+               _plane(("seg", (x1, y1), (x2, y2))))
+
+
+def _dr_repeats(rng):
+    while True:
+        xs = sorted(rng.sample(range(-5, 7), 4))
+        ys = [rng.randint(-4, 9) for _ in xs]
+        if 1 < len(set(ys)) < 4 and not set(ys) <= set(xs):  # else "every number" would equal the domain
+            break
+    fmt = lambda s: "{" + ", ".join(map(str, s)) + "}"
+    pts = ", ".join(f"({v}, {w})" for v, w in zip(xs, ys))
+    correct = fmt(sorted(set(ys)))
+    twice = next(v for v in ys if ys.count(v) > 1)
+    distractors = [
+        (fmt(sorted(ys)), f"List each value once. {twice} shows up more than once in the points, but only once "
+                          f"in the range."),
+        (fmt(xs), "That's the domain: the x-values, the first number in each point."),
+        (fmt(sorted(set(xs + ys))), "The range has only the y-values, not every number in the points."),
+    ]
+    steps = ["The range is the set of all y-values (outputs): the second number in each point.",
+             f"The y-values are {', '.join(map(str, ys))}.",
+             f"A set lists each value once, so the range is {correct}."]
+    return _dr(rng, f"A function is made of the points {pts}. What is its range?", correct, distractors, steps,
+               [steps[0], "Write them as a set: each value only once, smallest first."])
+
+
+def _dr_line(rng):
+    flat = rng.random() < 0.35
+    c = nz(rng, -4, 4)
+    a, b = ((0, c), (1, c)) if flat else _slanted(rng, rng.choice([1, -1]))
+    domain = rng.random() < 0.5
+    ask, xy = ("domain", "x") if domain else ("range", "y")
+    picture = (f"{-PLANE_N} ≤ {xy} ≤ {PLANE_N}", "That's only the part that fits in the picture. The arrows mean "
+                                                 "the line keeps going past the edge.")
+    if flat and not domain:
+        correct = f"Only y = {c}"
+        distractors = [("All real numbers", f"The line goes on forever left and right, but never up or down: "
+                                            f"every point on it has y = {c}."),
+                       picture,
+                       (f"Only x = {c}", f"The x-values aren't stuck. The line is flat, so it's the y-value that "
+                                         f"stays at {c}.")]
+        seen = f"It's flat at y = {c}, so {c} is its only y-value."
+    else:
+        correct = "All real numbers"
+        less = "left" if domain else "down"
+        more = "right" if domain else "up"
+        distractors = [picture,
+                       (f"{xy} ≥ 0", f"The line keeps going {less} too, into negative {xy}-values."),
+                       (f"Only y = {c}", "That's the range. The domain is the x-values.") if flat else
+                       (f"{xy} ≤ 0", f"The line keeps going {more} too, into positive {xy}-values.")]
+        seen = ("It goes on forever left and right, so it covers every x-value." if domain or flat else
+                "It slants forever up and down, so it covers every y-value.")
+    steps = [DR_RULE, "Arrows on the ends mean the line keeps going forever, past the edge of the picture.", seen,
+             f"So the {ask} is {correct[0].lower()}{correct[1:]}."]
+    return _dr(rng, f"What is the {ask} of the line in the graph?", correct, distractors, steps, steps[:2],
+               _plane(("line", a, b)))
+
+
+def _dr(rng, prompt, correct, distractors, steps, guide, fig=None):
+    q = mc(rng, "Domain and range", prompt, correct, distractors, steps)
+    q["guide"] = guide
+    if fig:
+        q["figure"] = fig
+    return q
+
+
 # ---------------------------------------------------------------- bonus: geometry
 # Identify-the-concept questions with a picture: no calculating. Only used for the bonus question.
 
@@ -1579,17 +1990,20 @@ GEOMETRY = [triangle_sides, triangle_angles, angle_types, angle_pairs, quadrilat
 
 # ---------------------------------------------------------------- daily rounds
 
-FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions, xy_names]
+FUNDAMENTALS = [order_of_operations, integers, name_the_rule, like_terms, translate, fractions, xy_names,
+                domain_range, slope_sign, horizontal_vertical]
 WORD_PROBLEMS = [word_rate, consecutive, distance, temperature]
 GENERATORS = [two_step, both_sides, distribute_solve, inequality, slope, line_equation, evaluate,
               function_notation, simplify, exponents, factoring, system, *WORD_PROBLEMS, *FUNDAMENTALS]
 ROUND_SIZE, ROUNDS = 5, 2
 BONUS_IDX = ROUND_SIZE * ROUNDS  # the geometry bonus comes after the last round
+# topics being practiced right now: drawn FOCUS_WEIGHT times as often as the rest
+FOCUS, FOCUS_WEIGHT = [domain_range, slope_sign, horizontal_vertical], 3
 
 
 def _draw(rng, pool, used):
     fresh = [g for g in pool if g not in used] or pool
-    g = rng.choice(fresh)
+    g = rng.choices(fresh, [FOCUS_WEIGHT if g in FOCUS else 1 for g in fresh])[0]
     used.add(g)
     return g
 

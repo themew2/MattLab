@@ -6,6 +6,10 @@
 
 ## Done
 
+- [x] Domain and range, positive and negative slope, and horizontal and vertical lines
+      (fundamentals, several with a coordinate-grid picture). Drawn 3x as often as older
+      topics (`FOCUS` in questions.py).
+
 - [x] Separate install instructions for Linux, Mac, and Windows (Docker and plain Python),
       plus finding the IP and opening the firewall on each.
 - [x] Troubleshooting section, with `manage.py` commands to reset a player's round, reset a

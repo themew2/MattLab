@@ -132,7 +132,9 @@ the port on your router or otherwise put it on the internet.
   - Fundamentals (always multiple choice): order of operations, integer operations,
     naming the property, like terms, translating words to expressions, fraction operations,
     names for x and y (coordinates, input/output, independent/dependent, domain/range,
-    rise/run).
+    rise/run), and three newer topics drawn on a coordinate grid: domain and range,
+    positive and negative slope, and horizontal and vertical lines. The newer topics come up
+    about three times as often as the others, about two of the 10 questions a day.
   - Word problems: rate, consecutive integers, distance, temperature conversion.
   - Core: two-step equations, variables on both sides, distributive property,
     inequalities, slope, slope-intercept form, evaluating expressions, function notation,
@@ -260,6 +262,10 @@ Everything lives in the `data/` folder: `algebra.db` (players and scores) and
 - **Add a topic:** write a generator in `questions.py` returning `inp(...)` or `mc(...)` and
   add it to `FUNDAMENTALS`, `WORD_PROBLEMS`, `GEOMETRY` (bonus only), or the core part of
   `GENERATORS`. `mc` distractors can be `(choice, mistake)` pairs, to explain a wrong pick.
+- **Practice focus:** topics in `FOCUS` are drawn `FOCUS_WEIGHT` times as often as the rest.
+  Change the list to shift the focus; an empty list makes every topic equally likely.
+- **Graphs:** `_plane(("line", p, q), ("seg", p, q))` draws a coordinate grid from -6 to 6
+  with a whole line (arrows at the edges) or a segment (dots at the ends) on it.
 - **Explain to me:** `guide(q)` in `questions.py` builds it from the steps: for a number
   answer, the steps up to the one where it comes out as a result, with it replaced by "?";
   for a word answer, the steps before the one that names it. Where the answer is built in
